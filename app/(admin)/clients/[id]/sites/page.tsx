@@ -18,15 +18,17 @@ export default async function ClientSitesPage({
 
   if (!client) return notFound();
 
+  const clientId = client.id;
+
   const sites = await prisma.clientSite.findMany({
-    where: { clientId: client.id },
+    where: { clientId },
     orderBy: { name: "asc" },
   });
 
   async function createSite(formData: FormData) {
     "use server";
 
-    const clientId = client.id;
+    const clientId = params.id;
 
     const name = String(formData.get("name") ?? "").trim();
     const address = String(formData.get("address") ?? "").trim() || null;
@@ -83,8 +85,10 @@ export default async function ClientSitesPage({
   async function deleteSite(formData: FormData) {
     "use server";
 
+    const clientId = params.id;
     const siteId = String(formData.get("siteId") ?? "").trim();
-    if (!siteId) redirect(`/clients/${client.id}/sites`);
+
+    if (!siteId) redirect(`/clients/${clientId}/sites`);
 
     try {
       await prisma.clientSite.delete({
@@ -92,13 +96,13 @@ export default async function ClientSitesPage({
       });
     } catch (e: any) {
       redirect(
-        `/clients/${client.id}/sites?err=${encodeURIComponent(
+        `/clients/${clientId}/sites?err=${encodeURIComponent(
           e?.message ?? "Errore eliminazione sede"
         )}`
       );
     }
 
-    redirect(`/clients/${client.id}/sites?ok=${encodeURIComponent("Sede eliminata")}`);
+    redirect(`/clients/${clientId}/sites?ok=${encodeURIComponent("Sede eliminata")}`);
   }
 
   return (
@@ -113,7 +117,7 @@ export default async function ClientSitesPage({
         <h1>Sedi — {client.name}</h1>
 
         <div className="row" style={{ gap: 8 }}>
-          <Link className="btn" href={`/clients/${client.id}`}>
+          <Link className="btn" href={`/clients/${clientId}`}>
             ← Torna al cliente
           </Link>
           <Link className="btn" href="/clients">
@@ -213,11 +217,11 @@ export default async function ClientSitesPage({
 
                 <td>
                   <div className="row" style={{ gap: 8 }}>
-                    <Link className="btn" href={`/clients/${client.id}/sites/${s.id}`}>
+                    <Link className="btn" href={`/clients/${clientId}/sites/${s.id}`}>
                       Apri
                     </Link>
 
-                    <Link className="btn" href={`/clients/${client.id}/sites/${s.id}/edit`}>
+                    <Link className="btn" href={`/clients/${clientId}/sites/${s.id}/edit`}>
                       Modifica
                     </Link>
 

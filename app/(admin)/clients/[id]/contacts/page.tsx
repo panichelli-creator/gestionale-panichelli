@@ -46,6 +46,7 @@ export default async function ClientContactsPage({
 
   if (!client) return notFound();
 
+  const clientId = client.id;
   const returnTo = String(searchParams?.returnTo ?? "").trim();
   const editId = String(searchParams?.edit ?? "").trim() || null;
   const contactInEdit =
@@ -62,7 +63,7 @@ export default async function ClientContactsPage({
     }
 
     const qs = p.toString();
-    return qs ? `/clients/${client.id}/contacts?${qs}` : `/clients/${client.id}/contacts`;
+    return qs ? `/clients/${clientId}/contacts?${qs}` : `/clients/${clientId}/contacts`;
   }
 
   async function createContact(formData: FormData) {
@@ -192,7 +193,7 @@ export default async function ClientContactsPage({
     redirect(buildUrl({ ok: "Contatto eliminato" }));
   }
 
-  const backHref = returnTo || `/clients/${client.id}`;
+  const backHref = returnTo || `/clients/${clientId}`;
   const cancelEditHref = buildPageUrl();
   const editBaseHref = (contactId: string) => buildPageUrl({ edit: contactId });
 
@@ -441,10 +442,7 @@ export default async function ClientContactsPage({
                 <td>{ct.phone ?? "—"}</td>
                 <td>
                   <div className="row" style={{ gap: 8 }}>
-                    <Link
-                      className="btn"
-                      href={editBaseHref(ct.id)}
-                    >
+                    <Link className="btn" href={editBaseHref(ct.id)}>
                       Modifica
                     </Link>
 

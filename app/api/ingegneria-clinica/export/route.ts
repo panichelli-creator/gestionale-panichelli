@@ -97,9 +97,7 @@ export async function GET(req: Request) {
         r.fileSuDropbox ? "SI" : "NO",
         r.fatturata ? "SI" : "NO",
         r.notes ?? "",
-      ]
-        .map(csvEscape)
-        .join(";")
+      ].map(csvEscape).join(";")
     );
   }
 

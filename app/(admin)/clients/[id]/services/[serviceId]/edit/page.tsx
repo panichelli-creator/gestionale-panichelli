@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { markClientServiceDone } from "@/app/actions/clientServices";
 
-const STATI = ["DA_FARE", "SVOLTO", "IN_CORSO", "SOSPESO"] as const;
+const STATI = ["DA_FARE", "SVOLTO", "IN_CORSO", "SOSPESO", "FATTURATO"] as const;
 const PRIORITA = ["BASSA", "MEDIA", "ALTA"] as const;
 const PERIODICITA = ["ANNUALE", "SEMESTRALE", "BIENNALE", "TRIENNALE", "QUINQUENNALE"] as const;
 const REFERENTI_RX = ["DE ROSE", "IANNARELLA", "PHSC"] as const;
@@ -39,6 +39,7 @@ export default async function EditClientServicePage({
   if (cs.clientId !== params.id) return notFound();
 
   const clientId = cs.clientId;
+  const clientServiceId = cs.id;
 
   const [services, sites] = await Promise.all([
     prisma.serviceCatalog.findMany({
@@ -54,8 +55,8 @@ export default async function EditClientServicePage({
   async function updateCS(formData: FormData) {
     "use server";
 
-    const safeClientId = cs.clientId;
-    const clientServiceId = cs.id;
+    const safeClientId = params.id;
+    const safeClientServiceId = params.serviceId;
 
     const serviceId = String(formData.get("serviceId") ?? "").trim();
     const siteIdRaw = String(formData.get("siteId") ?? "").trim();
@@ -127,12 +128,12 @@ export default async function EditClientServicePage({
 
     try {
       await prisma.clientService.update({
-        where: { id: clientServiceId },
+        where: { id: safeClientServiceId },
         data,
       });
     } catch (e: any) {
       const msg = encodeURIComponent(e?.message ?? "Errore salvataggio");
-      redirect(`/clients/${safeClientId}/services/${clientServiceId}/edit?err=${msg}`);
+      redirect(`/clients/${safeClientId}/services/${safeClientServiceId}/edit?err=${msg}`);
     }
 
     redirect(`/clients/${safeClientId}`);
@@ -187,7 +188,7 @@ export default async function EditClientServicePage({
 
         <form action={markClientServiceDone} className="row" style={{ marginTop: 10, gap: 8 }}>
           <input type="hidden" name="clientId" value={clientId} />
-          <input type="hidden" name="clientServiceId" value={cs.id} />
+          <input type="hidden" name="clientServiceId" value={clientServiceId} />
           <input type="hidden" name="redirectPath" value={`/clients/${clientId}`} />
 
           <button className="btn primary" type="submit">
@@ -349,7 +350,7 @@ export default async function EditClientServicePage({
 
           <Link
             className="btn"
-            href={`/clients/${clientId}/services/${cs.id}/delete`}
+            href={`/clients/${clientId}/services/${clientServiceId}/delete`}
             style={{ border: "1px solid #ff6b6b", color: "#ff6b6b" }}
           >
             Elimina

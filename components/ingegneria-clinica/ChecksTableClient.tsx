@@ -798,17 +798,16 @@ export default function ChecksTableClient({
                 <div style={{ gridColumn: "1 / -1" }}>
                   <div className="muted">Indirizzo sede</div>
                   <div>
-                    {selected.indirizzoSedeSnapshot ??
-                      [
-                        selected.site?.address,
-                        selected.site?.city,
-                        selected.site?.province,
-                        selected.site?.cap,
-                      ]
-                        .filter(Boolean)
-                        .join(" ") ||
-                      "—"}
-                  </div>
+  {selected.indirizzoSedeSnapshot ??
+    ([
+      selected.site?.address,
+      selected.site?.city,
+      selected.site?.province,
+      selected.site?.cap,
+    ]
+      .filter(Boolean)
+      .join(", ") || "—")}
+</div>
                 </div>
 
                 <div style={{ gridColumn: "1 / -1" }}>

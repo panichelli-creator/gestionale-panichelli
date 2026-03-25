@@ -3,7 +3,10 @@ import Link from "next/link";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const lists = [
+const lists: Array<{
+  name: string;
+  params: Record<string, string>;
+}> = [
   {
     name: "ASO",
     params: {
@@ -39,7 +42,6 @@ const lists = [
 export default function MarketingListsPage() {
   return (
     <div className="card">
-
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h1>Liste Marketing</h1>
 
@@ -59,21 +61,16 @@ export default function MarketingListsPage() {
 
         <tbody>
           {lists.map((l) => {
-
             const qs = new URLSearchParams(l.params).toString();
 
             return (
               <tr key={l.name}>
-
                 <td>
                   <b>{l.name}</b>
                 </td>
 
                 <td>
-                  <Link
-                    className="btn"
-                    href={`/contacts?${qs}`}
-                  >
+                  <Link className="btn" href={`/contacts?${qs}`}>
                     Apri
                   </Link>
                 </td>
@@ -86,14 +83,11 @@ export default function MarketingListsPage() {
                     Export Voxmail
                   </a>
                 </td>
-
               </tr>
             );
           })}
         </tbody>
-
       </table>
-
     </div>
   );
 }

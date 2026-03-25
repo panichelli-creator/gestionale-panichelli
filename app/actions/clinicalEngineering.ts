@@ -27,9 +27,8 @@ function boolFromForm(v: any) {
 function dateFromYmd(v: any) {
   const val = s(v);
   if (!val) return null;
-  const m = /^\d{4}-\d{2}-\d{2}$/.exec(val);
-  if (!m) return null;
-  const d = new Date(val + "T00:00:00.000Z");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return null;
+  const d = new Date(`${val}T00:00:00.000Z`);
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
@@ -129,7 +128,7 @@ async function syncClinicalCheckWorkReport(checkId: string) {
         ym,
         clientId: check.clientId,
         serviceId,
-        siteId: (check as any).clientSiteId ?? null,
+        siteId: check.siteId ?? null,
         amountEur,
         workedAt,
         notes: notesParts.join(" • "),
@@ -143,7 +142,7 @@ async function syncClinicalCheckWorkReport(checkId: string) {
       ym,
       clientId: check.clientId,
       serviceId,
-      siteId: (check as any).clientSiteId ?? null,
+      siteId: check.siteId ?? null,
       amountEur,
       workedAt,
       notes: notesParts.join(" • "),
@@ -155,7 +154,7 @@ export async function createClinicalEngineeringCheck(formData: FormData) {
   const redirectPath = s(formData.get("redirectPath") || "/ingegneria-clinica");
 
   const clientId = s(formData.get("clientId")) || null;
-  const clientSiteId = s(formData.get("clientSiteId")) || null;
+  const siteId = s(formData.get("clientSiteId")) || null;
 
   const dataProssimo = dateFromYmd(formData.get("dataProssimoAppuntamento"));
   if (!dataProssimo) redirect(redirectPath);
@@ -163,31 +162,25 @@ export async function createClinicalEngineeringCheck(formData: FormData) {
   const created = await prisma.clinicalEngineeringCheck.create({
     data: {
       clientId,
-      clientSiteId,
-
-      nomeClienteSnapshot: s(formData.get("nomeClienteSnapshot")),
+      siteId,
+      nomeClienteSnapshot: s(formData.get("nomeClienteSnapshot")) || null,
+      nomeSedeSnapshot: s(formData.get("nomeSedeSnapshot")) || null,
       indirizzoSedeSnapshot: s(formData.get("indirizzoSedeSnapshot")) || null,
-
+      studioRifAmministrativo: s(formData.get("studioRifAmministrativo")) || null,
+      contattiMail: s(formData.get("contattiMail")) || null,
+      contattiCellulare: s(formData.get("contattiCellulare")) || null,
       numApparecchiature: i(formData.get("numApparecchiature")),
       apparecchiatureAggiuntive: i(formData.get("apparecchiatureAggiuntive")),
-
       costoServizio: n(formData.get("costoServizio")),
       quotaTecnico: n(formData.get("quotaTecnico")),
       importoTrasferta: n(formData.get("importoTrasferta")),
-
-      contattiStudio: s(formData.get("contattiStudio")) || null,
-      contattiMail: s(formData.get("contattiMail")) || null,
-      contattiCellulare: s(formData.get("contattiCellulare")) || null,
-
       dataUltimoAppuntamento: dateFromYmd(formData.get("dataUltimoAppuntamento")),
+      dataAppuntamentoPreso: dateFromYmd(formData.get("dataAppuntamentoPreso")),
       dataProssimoAppuntamento: dataProssimo,
-
       verificheEseguite: boolFromForm(formData.get("verificheEseguite")),
       fileSuDropbox: boolFromForm(formData.get("fileSuDropbox")),
       fatturata: boolFromForm(formData.get("fatturata")),
-
       notes: s(formData.get("notes")) || null,
-      allegatiJson: "[]",
     },
   });
 
@@ -197,7 +190,7 @@ export async function createClinicalEngineeringCheck(formData: FormData) {
     if (meta) {
       await prisma.clinicalEngineeringCheck.update({
         where: { id: created.id },
-        data: { allegatiJson: JSON.stringify([meta]) },
+        data: { notes: JSON.stringify([{ allegato: meta }]) + (created.notes ? `\n${created.notes}` : "") },
       });
     }
   }
@@ -219,36 +212,31 @@ export async function updateClinicalEngineeringCheck(formData: FormData) {
   if (!existing) redirect(redirectPath);
 
   const clientId = s(formData.get("clientId")) || null;
-  const clientSiteId = s(formData.get("clientSiteId")) || null;
+  const siteId = s(formData.get("clientSiteId")) || null;
 
   await prisma.clinicalEngineeringCheck.update({
     where: { id },
     data: {
       clientId,
-      clientSiteId,
-
+      siteId,
       nomeClienteSnapshot: s(formData.get("nomeClienteSnapshot")) || existing.nomeClienteSnapshot,
+      nomeSedeSnapshot: s(formData.get("nomeSedeSnapshot")) || existing.nomeSedeSnapshot,
       indirizzoSedeSnapshot: s(formData.get("indirizzoSedeSnapshot")) || null,
-
+      studioRifAmministrativo: s(formData.get("studioRifAmministrativo")) || null,
+      contattiMail: s(formData.get("contattiMail")) || null,
+      contattiCellulare: s(formData.get("contattiCellulare")) || null,
       numApparecchiature: i(formData.get("numApparecchiature")),
       apparecchiatureAggiuntive: i(formData.get("apparecchiatureAggiuntive")),
-
       costoServizio: n(formData.get("costoServizio")),
       quotaTecnico: n(formData.get("quotaTecnico")),
       importoTrasferta: n(formData.get("importoTrasferta")),
-
-      contattiStudio: s(formData.get("contattiStudio")) || null,
-      contattiMail: s(formData.get("contattiMail")) || null,
-      contattiCellulare: s(formData.get("contattiCellulare")) || null,
-
       dataUltimoAppuntamento: dateFromYmd(formData.get("dataUltimoAppuntamento")),
+      dataAppuntamentoPreso: dateFromYmd(formData.get("dataAppuntamentoPreso")),
       dataProssimoAppuntamento:
         dateFromYmd(formData.get("dataProssimoAppuntamento")) ?? existing.dataProssimoAppuntamento,
-
       verificheEseguite: boolFromForm(formData.get("verificheEseguite")),
       fileSuDropbox: boolFromForm(formData.get("fileSuDropbox")),
       fatturata: boolFromForm(formData.get("fatturata")),
-
       notes: s(formData.get("notes")) || null,
     },
   });
@@ -257,17 +245,11 @@ export async function updateClinicalEngineeringCheck(formData: FormData) {
   if (file && typeof file === "object" && file.size > 0) {
     const meta = await saveAttachmentFile(file, id);
     if (meta) {
-      let list: any[] = [];
-      try {
-        list = JSON.parse(existing.allegatiJson || "[]");
-        if (!Array.isArray(list)) list = [];
-      } catch {
-        list = [];
-      }
-      list.push(meta);
+      const prevNotes = existing.notes ?? "";
+      const nextNotes = JSON.stringify([{ allegato: meta }]) + (prevNotes ? `\n${prevNotes}` : "");
       await prisma.clinicalEngineeringCheck.update({
         where: { id },
-        data: { allegatiJson: JSON.stringify(list) },
+        data: { notes: nextNotes },
       });
     }
   }
@@ -315,26 +297,21 @@ export async function removeClinicalEngineeringAttachment(formData: FormData) {
   const existing = await prisma.clinicalEngineeringCheck.findUnique({ where: { id } });
   if (!existing) redirect("/ingegneria-clinica");
 
-  let list: any[] = [];
-  try {
-    list = JSON.parse(existing.allegatiJson || "[]");
-    if (!Array.isArray(list)) list = [];
-  } catch {
-    list = [];
-  }
+  const notes = String(existing.notes ?? "");
+  const nextNotes = notes
+    .split("\n")
+    .filter((line) => !line.includes(url))
+    .join("\n");
 
-  const next = list.filter((a) => a?.url !== url);
   await prisma.clinicalEngineeringCheck.update({
     where: { id },
-    data: { allegatiJson: JSON.stringify(next) },
+    data: { notes: nextNotes || null },
   });
 
   try {
     const abs = path.join(process.cwd(), "public", url);
     await fs.unlink(abs);
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   revalidatePath(`/ingegneria-clinica/${id}`);
   redirect(`/ingegneria-clinica/${id}`);

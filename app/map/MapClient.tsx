@@ -1,4 +1,3 @@
-
 "use client";
 
 import { MapContainer, Marker, Popup, TileLayer, Polyline } from "react-leaflet";
@@ -10,7 +9,7 @@ type MarkerRow = {
   id: string;
   clientId: string;
   clientName: string;
-  clientType: string;
+  clientType?: string;
   serviceName: string;
   siteName: string;
   address: string;
@@ -125,7 +124,7 @@ export default function MapClient({ markers }: Props) {
                   </div>
                 ) : null}
 
-                {(Number(m.rxEndoralCount ?? 0) > 0 || Number(m.rxOptCount ?? 0) > 0) ? (
+                {Number(m.rxEndoralCount ?? 0) > 0 || Number(m.rxOptCount ?? 0) > 0 ? (
                   <div style={{ marginTop: 8, color: "#475569" }}>
                     RX Endorali: <b>{Number(m.rxEndoralCount ?? 0)}</b> • RX OPT: <b>{Number(m.rxOptCount ?? 0)}</b>
                   </div>

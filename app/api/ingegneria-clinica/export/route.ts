@@ -12,7 +12,8 @@ function firstDayNextMonth(ym: string) {
 function csvEscape(v: any) {
   const s = String(v ?? "");
   if (/[
-",;]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
+
+",;]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
   return s;
 }
 

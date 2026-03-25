@@ -4,16 +4,15 @@ function firstDayOfMonth(ym: string) {
   const [y, m] = ym.split("-").map(Number);
   return new Date(Date.UTC(y, (m ?? 1) - 1, 1));
 }
+
 function firstDayNextMonth(ym: string) {
   const [y, m] = ym.split("-").map(Number);
-  return new Date(Date.UTC(y, (m ?? 1), 1));
+  return new Date(Date.UTC(y, m ?? 1, 1));
 }
 
 function csvEscape(v: any) {
   const s = String(v ?? "");
-  if (/[
-
-",;]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
+  if (/[",;\n]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
   return s;
 }
 
@@ -33,6 +32,7 @@ export async function GET(req: Request) {
   const where: any = {
     dataProssimoAppuntamento: { gte: from, lt: to },
   };
+
   if (fatturata === "0") where.fatturata = false;
   if (fatturata === "1") where.fatturata = true;
 
@@ -77,28 +77,33 @@ export async function GET(req: Request) {
     lines.push(
       [
         r.id,
-        r.nomeClienteSnapshot,
+        r.nomeClienteSnapshot ?? "",
         r.indirizzoSedeSnapshot ?? "",
         r.numApparecchiature,
         r.apparecchiatureAggiuntive,
         Number(r.costoServizio || 0).toFixed(2),
         Number(r.importoTrasferta || 0).toFixed(2),
         Number(r.quotaTecnico || 0).toFixed(2),
-        r.dataUltimoAppuntamento ? new Date(r.dataUltimoAppuntamento).toISOString().slice(0, 10) : "",
-        new Date(r.dataProssimoAppuntamento).toISOString().slice(0, 10),
+        r.dataUltimoAppuntamento
+          ? new Date(r.dataUltimoAppuntamento).toISOString().slice(0, 10)
+          : "",
+        r.dataProssimoAppuntamento
+          ? new Date(r.dataProssimoAppuntamento).toISOString().slice(0, 10)
+          : "",
         r.contattiMail ?? "",
         r.contattiCellulare ?? "",
-        r.contattiStudio ?? "",
+        (r as any).contattiStudio ?? "",
         r.verificheEseguite ? "SI" : "NO",
         r.fileSuDropbox ? "SI" : "NO",
         r.fatturata ? "SI" : "NO",
         r.notes ?? "",
-      ].map(csvEscape).join(";")
+      ]
+        .map(csvEscape)
+        .join(";")
     );
   }
 
-  const csv = "﻿" + lines.join("
-");
+  const csv = "\uFEFF" + lines.join("\n");
   const filename = `ingegneria-clinica_${due}.csv`;
 
   return new Response(csv, {

@@ -1,0 +1,315 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+}
+
+model Client {
+  id                     String                     @id @default(cuid())
+  name                   String                     @unique
+  type                   String                     @default("ALTRO")
+  status                 String                     @default("ATTIVO")
+  dismissedAt            DateTime?
+  vatNumber              String?
+  uniqueCode             String?
+  pec                    String?
+  email                  String?
+  phone                  String?
+  address                String?
+  legalSeat              String?
+  operativeSeat          String?
+  employeesCount         Int?
+  notes                  String?
+  occupationalDoctorName String?
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+  contacts               ClientContact[]
+  practices              ClientPractice[]
+  services               ClientService[]
+  sites                  ClientSite[]
+  clinicalChecks         ClinicalEngineeringCheck[]
+  mapPlans               MapPlanItem[]
+  people                 Person[]
+  personClients          PersonClient[]
+  workReports            WorkReport[]               @relation("WorkReportClient")
+}
+
+model ClientContact {
+  id            String   @id @default(cuid())
+  clientId      String
+  role          String   @default("ALTRO")
+  name          String
+  email         String?
+  phone         String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  marketingList String?  @default("ALTRO")
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([marketingList])
+  @@index([role])
+}
+
+model ClientSite {
+  id             String                     @id @default(cuid())
+  clientId       String
+  name           String
+  address        String?
+  city           String?
+  province       String?
+  cap            String?
+  notes          String?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+  clientServices ClientService[]
+  client         Client                     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clinicalChecks ClinicalEngineeringCheck[]
+  mapPlans       MapPlanItem[]
+  personSites    PersonSite[]
+  workReports    WorkReport[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
+}
+
+model ServiceCatalog {
+  id             String          @id @default(cuid())
+  name           String          @unique
+  isActive       Boolean         @default(true)
+  clientServices ClientService[]
+  workReports    WorkReport[]    @relation("WorkReportService")
+}
+
+model ClientService {
+  id             String         @id @default(cuid())
+  clientId       String
+  serviceId      String
+  siteId         String?
+  rxEndoralCount Int?
+  rxOptCount     Int?
+  dueDate        DateTime?
+  lastDoneAt     DateTime?
+  priceEur       Decimal?
+  periodicity    String         @default("ANNUALE")
+  priority       String         @default("MEDIA")
+  status         String         @default("DA_FARE")
+  alertMonths    Int            @default(1)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  source         String?
+  referenteName  String?
+  referentePerc  Decimal?
+  service        ServiceCatalog @relation(fields: [serviceId], references: [id])
+  client         Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  site           ClientSite?    @relation(fields: [siteId], references: [id])
+  mapPlans       MapPlanItem[]
+
+  @@index([clientId])
+  @@index([siteId])
+  @@index([dueDate])
+  @@index([source])
+  @@index([referenteName])
+}
+
+model ClinicalEngineeringCheck {
+  id                        String      @id @default(cuid())
+  clientId                  String?
+  siteId                    String?
+  nomeClienteSnapshot       String?
+  nomeSedeSnapshot          String?
+  indirizzoSedeSnapshot     String?
+  studioRifAmministrativo   String?
+  contattiMail              String?
+  contattiCellulare         String?
+  numApparecchiature        Int         @default(0)
+  apparecchiatureAggiuntive Int         @default(0)
+  costoServizio             Decimal     @default(0)
+  quotaTecnicoPerc          Decimal     @default(40)
+  quotaTecnico              Decimal     @default(0)
+  importoTrasferta          Decimal     @default(0)
+  periodicita               String      @default("ANNUALE")
+  dataUltimoAppuntamento    DateTime?
+  dataProssimoAppuntamento  DateTime?
+  verificheEseguite         Boolean     @default(false)
+  fileSuDropbox             Boolean     @default(false)
+  fatturata                 Boolean     @default(false)
+  tecnicoFatturato          Boolean     @default(false)
+  notes                     String?
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
+  fatturataAt               DateTime?
+  tecnicoFatturatoAt        DateTime?
+  dataAppuntamentoPreso     DateTime?
+  site                      ClientSite? @relation(fields: [siteId], references: [id])
+  client                    Client?     @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([siteId])
+  @@index([dataAppuntamentoPreso])
+  @@index([dataProssimoAppuntamento])
+  @@index([fatturataAt])
+  @@index([tecnicoFatturatoAt])
+}
+
+model Person {
+  id               String           @id @default(cuid())
+  fiscalCode       String?          @unique
+  lastName         String
+  firstName        String
+  email            String?
+  phone            String?
+  role             String?
+  hireDate         DateTime?
+  medicalCheckDone Boolean          @default(false)
+  clientId         String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  client           Client?          @relation(fields: [clientId], references: [id])
+  personClients    PersonClient[]
+  personSites      PersonSite[]
+  trainings        TrainingRecord[]
+
+  @@index([lastName, firstName])
+}
+
+model PersonClient {
+  id        String   @id @default(cuid())
+  personId  String
+  clientId  String
+  createdAt DateTime @default(now())
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, clientId])
+  @@index([personId])
+  @@index([clientId])
+}
+
+model PersonSite {
+  id        String     @id @default(cuid())
+  personId  String
+  siteId    String
+  createdAt DateTime   @default(now())
+  site      ClientSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  person    Person     @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, siteId])
+  @@index([personId])
+  @@index([siteId])
+}
+
+model CourseCatalog {
+  id              String           @id @default(cuid())
+  name            String           @unique
+  category        String?
+  defaultPriceEur Decimal?
+  isActive        Boolean          @default(true)
+  trainingRecords TrainingRecord[]
+}
+
+model TrainingRecord {
+  id                   String        @id @default(cuid())
+  personId             String
+  courseId             String
+  performedAt          DateTime?
+  dueDate              DateTime?
+  status               String        @default("DA_FARE")
+  priority             String        @default("MEDIA")
+  priceEur             Decimal?
+  alertMonths          Int           @default(2)
+  alertMonths2         Int           @default(3)
+  certificateDelivered Boolean       @default(false)
+  notes                String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  course               CourseCatalog @relation(fields: [courseId], references: [id])
+  person               Person        @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, courseId])
+  @@index([dueDate])
+  @@index([personId])
+}
+
+model ClientPractice {
+  id              String    @id @default(cuid())
+  clientId        String
+  title           String
+  practiceDate    DateTime?
+  determinaNumber String?
+  inApertureList  Boolean   @default(false)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  apertureStatus  String?   @default("IN_ATTESA")
+  startYear       Int?
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([practiceDate])
+  @@index([inApertureList])
+  @@index([apertureStatus])
+  @@index([startYear])
+}
+
+model WorkReport {
+  id        String          @id @default(cuid())
+  ym        String
+  clientId  String
+  serviceId String?
+  siteId    String?
+  amountEur Decimal?
+  workedAt  DateTime        @default(now())
+  notes     String?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  service   ServiceCatalog? @relation("WorkReportService", fields: [serviceId], references: [id])
+  client    Client          @relation("WorkReportClient", fields: [clientId], references: [id], onDelete: Cascade)
+  site      ClientSite?     @relation(fields: [siteId], references: [id])
+
+  @@index([ym])
+  @@index([clientId])
+  @@index([serviceId])
+  @@index([siteId])
+  @@index([workedAt])
+}
+
+model MapPlanItem {
+  id              String        @id @default(cuid())
+  ym              String
+  clientServiceId String
+  clientId        String
+  siteId          String?
+  plannedDay      Int?
+  plannedDate     DateTime?
+  status          String        @default("DA_FARE")
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  site            ClientSite?   @relation(fields: [siteId], references: [id])
+  client          Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientService   ClientService @relation(fields: [clientServiceId], references: [id], onDelete: Cascade)
+
+  @@unique([ym, clientServiceId])
+  @@index([ym])
+  @@index([clientId])
+  @@index([siteId])
+  @@index([plannedDay])
+  @@index([plannedDate])
+  @@index([status])
+}

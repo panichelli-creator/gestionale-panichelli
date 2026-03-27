@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 function calcNextDate(last: Date | null, periodicita: string) {
   if (!last) return null;
 

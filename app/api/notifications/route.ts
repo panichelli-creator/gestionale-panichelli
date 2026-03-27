@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 function startOfTodayLocal() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);

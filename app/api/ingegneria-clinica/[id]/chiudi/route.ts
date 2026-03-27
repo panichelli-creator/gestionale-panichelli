@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,8 @@ function calcNextDate(last: Date | null, periodicita: string) {
   return d;
 }
 
-export async function POST(
+export async function POST(...args) {
+  const { prisma } = await import("@/lib/prisma");(
   req: Request,
   { params }: { params: { id: string } }
 ) {

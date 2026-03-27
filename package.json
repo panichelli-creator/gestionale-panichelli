@@ -10,7 +10,8 @@
     "prisma:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "import:csv": "node scripts/import-csv.mjs",
-    "reset-user": "tsx scripts/reset-user.ts"
+    "reset-user": "tsx scripts/reset-user.ts",
+    "fix:dynamic": "node scripts/fix-dynamic.js"
   },
   "dependencies": {
     "@prisma/client": "5.18.0",

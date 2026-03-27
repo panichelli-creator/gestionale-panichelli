@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,8 @@ function csvEscape(v: any) {
   return s;
 }
 
-export async function GET(req: Request) {
+export async function GET(...args) {
+  const { prisma } = await import("@/lib/prisma");(req: Request) {
   try {
     const url = new URL(req.url);
     const q = String(url.searchParams.get("q") ?? "").trim();

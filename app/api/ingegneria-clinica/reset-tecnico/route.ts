@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req: Request) {
+export async function POST(...args) {
+  const { prisma } = await import("@/lib/prisma");(req: Request) {
   try {
     await prisma.clinicalEngineeringCheck.updateMany({
       where: {

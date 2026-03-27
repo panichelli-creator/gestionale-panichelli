@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,8 @@ function csvCell(v: string) {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
-export async function GET(req: Request) {
+export async function GET(...args) {
+  const { prisma } = await import("@/lib/prisma");(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+
 import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -218,7 +218,8 @@ async function buildSafeUpdateData(id: string, body: any) {
   };
 }
 
-export async function GET(
+export async function GET(...args) {
+  const { prisma } = await import("@/lib/prisma");(
   _req: Request,
   { params }: { params: { id: string } }
 ) {

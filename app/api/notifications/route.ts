@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +15,8 @@ function addDays(base: Date, days: number) {
   return d;
 }
 
-export async function GET() {
+export async function GET(...args) {
+  const { prisma } = await import("@/lib/prisma");() {
   try {
     const today = startOfTodayLocal();
     const in7 = addDays(today, 7);

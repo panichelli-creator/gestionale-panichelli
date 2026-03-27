@@ -25,6 +25,8 @@ import {
   Map,
 } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 const FONT =
   'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"';
 

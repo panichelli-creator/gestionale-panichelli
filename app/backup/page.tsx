@@ -2,6 +2,9 @@ import Link from "next/link";
 import { backupNow, listBackups } from "@/app/actions/backup";
 import RestoreBackupButton from "./RestoreBackupButton";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function formatSize(bytes: number) {
   const kb = bytes / 1024;
   if (kb < 1024) return `${kb.toFixed(1)} KB`;
@@ -14,9 +17,7 @@ function formatSize(bytes: number) {
 export default async function BackupPage() {
   const backups = await listBackups();
 
-  const sorted = backups
-    .slice()
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const sorted = backups.slice().sort((a, b) => b.mtimeMs - a.mtimeMs);
 
   const latest = sorted[0];
 
@@ -48,8 +49,7 @@ export default async function BackupPage() {
 
         {latest && (
           <div className="muted" style={{ marginTop: 8 }}>
-            Ultimo backup:{" "}
-            <b>{new Date(latest.mtimeMs).toLocaleString("it-IT")}</b>
+            Ultimo backup: <b>{new Date(latest.mtimeMs).toLocaleString("it-IT")}</b>
           </div>
         )}
 
@@ -86,9 +86,7 @@ export default async function BackupPage() {
                       <code>{b.name}</code>
                     </td>
 
-                    <td>
-                      {new Date(b.mtimeMs).toLocaleString("it-IT")}
-                    </td>
+                    <td>{new Date(b.mtimeMs).toLocaleString("it-IT")}</td>
 
                     <td>{formatSize(b.size)}</td>
 
@@ -96,9 +94,7 @@ export default async function BackupPage() {
                       <div className="row" style={{ gap: 8 }}>
                         <a
                           className="btn"
-                          href={`/api/backup/download?file=${encodeURIComponent(
-                            b.name
-                          )}`}
+                          href={`/api/backup/download?file=${encodeURIComponent(b.name)}`}
                         >
                           Download
                         </a>

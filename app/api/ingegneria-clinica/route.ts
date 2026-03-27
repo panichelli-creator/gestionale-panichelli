@@ -43,8 +43,8 @@ function calcNextDate(last: Date | null, periodicita: string) {
   return d;
 }
 
-export async function POST(...args) {
-  const { prisma } = await import("@/lib/prisma");(req: Request) {
+export async function POST(req: Request) {
+  const { prisma } = await import("@/lib/prisma");
   try {
     const body = await req.json().catch(() => ({} as any));
 

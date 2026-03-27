@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-
 import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function num(v: any, fallback = 0) {
   if (v === "" || v == null) return fallback;
@@ -47,6 +47,8 @@ export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }
 ) {
+  const { prisma } = await import("@/lib/prisma");
+
   try {
     const body = await req.json().catch(() => ({} as any));
     const field = String(body.field ?? "").trim();

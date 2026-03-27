@@ -23,11 +23,11 @@ function walk(dir) {
 
 function fixFile(file) {
   let content = fs.readFileSync(file, "utf-8");
-
   let changed = false;
 
-  // FIX API route.ts
+  // FIX API
   if (file.endsWith("route.ts")) {
+    // header dynamic
     if (!content.includes('export const dynamic')) {
       content =
         `export const dynamic = "force-dynamic";\nexport const runtime = "nodejs";\n\n` +
@@ -35,25 +35,24 @@ function fixFile(file) {
       changed = true;
     }
 
-    // prisma lazy import
+    // prisma import
     if (content.includes('from "@/lib/prisma"')) {
       content = content.replace(
         /import\s+\{\s*prisma\s*\}\s+from\s+["']@\/lib\/prisma["'];?/g,
         ""
       );
 
-      if (!content.includes("await import")) {
-        content = content.replace(
-          /export async function (GET|POST|PUT|DELETE)/,
-          `export async function $1(...args) {\n  const { prisma } = await import("@/lib/prisma");`
-        );
-      }
+      // FIX FUNZIONI CORRETTO
+      content = content.replace(
+        /export async function (GET|POST|PUT|DELETE)\s*\(([^)]*)\)\s*{/g,
+        `export async function $1(req: Request, ctx: any) {\n  const { prisma } = await import("@/lib/prisma");`
+      );
 
       changed = true;
     }
   }
 
-  // FIX page.tsx
+  // FIX page
   if (file.endsWith("page.tsx")) {
     if (!content.includes('export const dynamic')) {
       content =
@@ -69,8 +68,6 @@ function fixFile(file) {
   }
 }
 
-const files = walk(ROOT);
-
-files.forEach(fixFile);
+walk(ROOT).forEach(fixFile);
 
 console.log("✅ DONE");

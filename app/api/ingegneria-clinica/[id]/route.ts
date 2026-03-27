@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-
 import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function num(v: any, fallback = 0) {
   if (v === "" || v == null) return fallback;
@@ -48,6 +48,8 @@ function calcNextDate(last: Date | null, periodicita: string) {
 }
 
 async function buildSafeUpdateData(id: string, body: any) {
+  const { prisma } = await import("@/lib/prisma");
+
   const current = await prisma.clinicalEngineeringCheck.findUnique({
     where: { id },
     include: {
@@ -97,7 +99,6 @@ async function buildSafeUpdateData(id: string, body: any) {
         address: true,
       },
     });
-
     if (!client) return { error: "Cliente non trovato" };
   } else {
     client = null;
@@ -119,7 +120,7 @@ async function buildSafeUpdateData(id: string, body: any) {
 
     if (!site) return { error: "Sede non trovata" };
     if (clientId && site.clientId !== clientId) {
-      return { error: "La sede selezionata non appartiene al cliente scelto." };
+      return { error: "La sede non appartiene al cliente." };
     }
   } else {
     site = null;
@@ -133,60 +134,30 @@ async function buildSafeUpdateData(id: string, body: any) {
   const appointmentDate = dateOrNull(
     body.dataAppuntamentoPreso ?? current.dataAppuntamentoPreso
   );
+
   const nextDate =
     dateOrNull(body.dataProssimoAppuntamento ?? current.dataProssimoAppuntamento) ??
     calcNextDate(lastDate, periodicita);
 
   const costoServizio = num(body.costoServizio ?? current.costoServizio, 0);
   const quotaTecnicoPerc = num(body.quotaTecnicoPerc ?? current.quotaTecnicoPerc, 40);
-  const quotaTecnicoBody = num(body.quotaTecnico, NaN);
-  const quotaTecnico = Number.isFinite(quotaTecnicoBody)
-    ? quotaTecnicoBody
-    : (costoServizio * quotaTecnicoPerc) / 100;
-
-  const indirizzoSnapshotBody = String(body.indirizzoSedeSnapshot ?? "").trim();
-  const indirizzoSnapshotComputed =
-    [site?.address, site?.city, site?.province, site?.cap].filter(Boolean).join(" ") ||
-    current.indirizzoSedeSnapshot ||
-    client?.operativeSeat ||
-    client?.legalSeat ||
-    client?.address ||
-    "";
+  const quotaTecnico =
+    Number.isFinite(num(body.quotaTecnico, NaN))
+      ? num(body.quotaTecnico)
+      : (costoServizio * quotaTecnicoPerc) / 100;
 
   return {
     clientId,
     siteId,
-
-    nomeClienteSnapshot:
-      String(body.nomeClienteSnapshot ?? "").trim() ||
-      client?.name ||
-      current.nomeClienteSnapshot ||
+    nomeClienteSnapshot: client?.name ?? current.nomeClienteSnapshot ?? null,
+    nomeSedeSnapshot: site?.name ?? current.nomeSedeSnapshot ?? null,
+    indirizzoSedeSnapshot:
+      [site?.address, site?.city, site?.province, site?.cap].filter(Boolean).join(" ") ||
+      current.indirizzoSedeSnapshot ||
       null,
 
-    nomeSedeSnapshot:
-      String(body.nomeSedeSnapshot ?? "").trim() ||
-      site?.name ||
-      current.nomeSedeSnapshot ||
-      null,
-
-    indirizzoSedeSnapshot: indirizzoSnapshotBody || indirizzoSnapshotComputed || null,
-
-    studioRifAmministrativo:
-      textOrNull(body.studioRifAmministrativo) ??
-      current.studioRifAmministrativo ??
-      null,
-
-    contattiMail:
-      textOrNull(body.contattiMail) ??
-      client?.email ??
-      current.contattiMail ??
-      null,
-
-    contattiCellulare:
-      textOrNull(body.contattiCellulare) ??
-      client?.phone ??
-      current.contattiCellulare ??
-      null,
+    contattiMail: client?.email ?? current.contattiMail ?? null,
+    contattiCellulare: client?.phone ?? current.contattiCellulare ?? null,
 
     numApparecchiature: Math.max(
       0,
@@ -204,7 +175,6 @@ async function buildSafeUpdateData(id: string, body: any) {
     importoTrasferta: dec(body.importoTrasferta ?? current.importoTrasferta, 0),
 
     periodicita,
-
     dataUltimoAppuntamento: lastDate,
     dataAppuntamentoPreso: appointmentDate,
     dataProssimoAppuntamento: nextDate,
@@ -218,105 +188,51 @@ async function buildSafeUpdateData(id: string, body: any) {
   };
 }
 
-export async function GET(...args) {
-  const { prisma } = await import("@/lib/prisma");(
-  _req: Request,
+export async function GET(
+  req: Request,
   { params }: { params: { id: string } }
 ) {
-  try {
-    const item = await prisma.clinicalEngineeringCheck.findUnique({
-      where: { id: params.id },
-      include: {
-        client: true,
-        site: true,
-      },
-    });
+  const { prisma } = await import("@/lib/prisma");
 
-    if (!item) {
-      return new NextResponse("Verifica non trovata", { status: 404 });
-    }
+  const item = await prisma.clinicalEngineeringCheck.findUnique({
+    where: { id: params.id },
+    include: { client: true, site: true },
+  });
 
-    return NextResponse.json(item);
-  } catch (e: any) {
-    return new NextResponse(String(e?.message ?? e ?? "Errore"), {
-      status: 500,
-    });
-  }
+  if (!item) return new NextResponse("Not found", { status: 404 });
+
+  return NextResponse.json(item);
 }
 
 export async function PUT(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  try {
-    const body = await req.json().catch(() => ({} as any));
-    const data = await buildSafeUpdateData(params.id, body);
+  const { prisma } = await import("@/lib/prisma");
 
-    if (!data) {
-      return new NextResponse("Verifica non trovata", { status: 404 });
-    }
+  const body = await req.json().catch(() => ({}));
+  const data = await buildSafeUpdateData(params.id, body);
 
-    if ("error" in data) {
-      return new NextResponse(data.error, { status: 400 });
-    }
+  if (!data || "error" in data)
+    return new NextResponse("Errore", { status: 400 });
 
-    const updated = await prisma.clinicalEngineeringCheck.update({
-      where: { id: params.id },
-      data,
-      select: { id: true },
-    });
+  await prisma.clinicalEngineeringCheck.update({
+    where: { id: params.id },
+    data,
+  });
 
-    return NextResponse.json({ ok: true, id: updated.id });
-  } catch (e: any) {
-    return new NextResponse(String(e?.message ?? e ?? "Errore"), {
-      status: 500,
-    });
-  }
-}
-
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const body = await req.json().catch(() => ({} as any));
-    const data = await buildSafeUpdateData(params.id, body);
-
-    if (!data) {
-      return new NextResponse("Verifica non trovata", { status: 404 });
-    }
-
-    if ("error" in data) {
-      return new NextResponse(data.error, { status: 400 });
-    }
-
-    const updated = await prisma.clinicalEngineeringCheck.update({
-      where: { id: params.id },
-      data,
-      select: { id: true },
-    });
-
-    return NextResponse.json({ ok: true, id: updated.id });
-  } catch (e: any) {
-    return new NextResponse(String(e?.message ?? e ?? "Errore"), {
-      status: 500,
-    });
-  }
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
-  try {
-    await prisma.clinicalEngineeringCheck.delete({
-      where: { id: params.id },
-    });
+  const { prisma } = await import("@/lib/prisma");
 
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return new NextResponse(String(e?.message ?? e ?? "Errore"), {
-      status: 500,
-    });
-  }
+  await prisma.clinicalEngineeringCheck.delete({
+    where: { id: params.id },
+  });
+
+  return NextResponse.json({ ok: true });
 }

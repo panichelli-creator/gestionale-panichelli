@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function toNum(v: any): number {
   if (v == null) return 0;
@@ -35,10 +35,14 @@ function calcNextDate(last: Date | null, periodicita: string) {
   return d;
 }
 
-async function findVseServiceId() {
+async function findVseServiceId(prisma: any) {
   const vseService = await prisma.serviceCatalog.findFirst({
     where: {
-      OR: [{ name: "VSE" }, { name: "INGEGNERIA CLINICA" }, { name: "Ingegneria Clinica" }],
+      OR: [
+        { name: "VSE" },
+        { name: "INGEGNERIA CLINICA" },
+        { name: "Ingegneria Clinica" },
+      ],
     },
     select: { id: true },
   });
@@ -47,6 +51,8 @@ async function findVseServiceId() {
 }
 
 async function syncClinicalCheckWorkReport(checkId: string) {
+  const { prisma } = await import("@/lib/prisma");
+
   const check = await prisma.clinicalEngineeringCheck.findUnique({
     where: { id: checkId },
     include: {
@@ -86,7 +92,7 @@ async function syncClinicalCheckWorkReport(checkId: string) {
     return;
   }
 
-  const serviceId = await findVseServiceId();
+  const serviceId = await findVseServiceId(prisma);
 
   const notesParts = [
     noteTag,
@@ -128,12 +134,21 @@ export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }
 ) {
+  const { prisma } = await import("@/lib/prisma");
+
   try {
     const body = await req.json().catch(() => ({} as any));
     const field = String(body.field ?? "").trim();
     const value = Boolean(body.value);
 
-    if (!["verificheEseguite", "fileSuDropbox", "fatturata", "tecnicoFatturato"].includes(field)) {
+    if (
+      ![
+        "verificheEseguite",
+        "fileSuDropbox",
+        "fatturata",
+        "tecnicoFatturato",
+      ].includes(field)
+    ) {
       return new NextResponse("Campo non valido", { status: 400 });
     }
 

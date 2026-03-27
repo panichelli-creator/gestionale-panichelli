@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(...args) {
-  const { prisma } = await import("@/lib/prisma");(req: Request) {
+export async function GET(req: Request) {
+  const { prisma } = await import("@/lib/prisma");
   try {
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") ?? "").trim();

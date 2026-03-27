@@ -11,7 +11,8 @@
     "db:migrate": "prisma migrate dev",
     "import:csv": "node scripts/import-csv.mjs",
     "reset-user": "tsx scripts/reset-user.ts",
-    "fix:dynamic": "node scripts/fix-dynamic.js"
+    "fix:dynamic": "node scripts/fix-dynamic.js",
+    "fix:broken": "node scripts/fix-broken-routes.js"
   },
   "dependencies": {
     "@prisma/client": "5.18.0",

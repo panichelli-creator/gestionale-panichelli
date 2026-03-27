@@ -1,7 +1,7 @@
-﻿
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function startOfTodayLocal() {
   const d = new Date();
@@ -15,13 +15,13 @@ function addDays(base: Date, days: number) {
   return d;
 }
 
-export async function GET(...args) {
-  const { prisma } = await import("@/lib/prisma");() {
+export async function GET(req: Request) {
+  const { prisma } = await import("@/lib/prisma");
+
   const today = startOfTodayLocal();
   const in7 = addDays(today, 7);
   const in30 = addDays(today, 30);
 
-  // âœ… 0â€“7 giorni
   const maintenance7 = await prisma.clientService.count({
     where: {
       dueDate: {
@@ -31,7 +31,6 @@ export async function GET(...args) {
     },
   });
 
-  // âœ… 0â€“30 giorni
   const maintenance30 = await prisma.clientService.count({
     where: {
       dueDate: {
@@ -42,7 +41,7 @@ export async function GET(...args) {
   });
 
   return NextResponse.json({
-    maintenance: maintenance30, // compatibilitÃ  con vecchio codice
+    maintenance: maintenance30,
     maintenance7,
     maintenance30,
   });

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function calcNextDate(last: Date | null, periodicita: string) {
   if (!last) return null;
@@ -23,11 +23,12 @@ function calcNextDate(last: Date | null, periodicita: string) {
   return d;
 }
 
-export async function POST(...args) {
-  const { prisma } = await import("@/lib/prisma");(
+export async function POST(
   req: Request,
   { params }: { params: { id: string } }
 ) {
+  const { prisma } = await import("@/lib/prisma");
+
   try {
     const current = await prisma.clinicalEngineeringCheck.findUnique({
       where: { id: params.id },

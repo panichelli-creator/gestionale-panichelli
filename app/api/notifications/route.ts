@@ -1,7 +1,7 @@
-
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function startOfTodayLocal() {
   const d = new Date();
@@ -15,8 +15,9 @@ function addDays(base: Date, days: number) {
   return d;
 }
 
-export async function GET(...args) {
-  const { prisma } = await import("@/lib/prisma");() {
+export async function GET(req: Request) {
+  const { prisma } = await import("@/lib/prisma");
+
   try {
     const today = startOfTodayLocal();
     const in7 = addDays(today, 7);

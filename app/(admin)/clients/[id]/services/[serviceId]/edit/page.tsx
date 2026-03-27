@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
-import { markClientServiceDone } from "@/app/actions/clientServices";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,6 +22,26 @@ function toPercString(v: any) {
   if (v == null) return "";
   const s = String(v?.toString?.() ?? v).trim();
   return s;
+}
+
+function addMonths(date: Date, months: number) {
+  const d = new Date(date);
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + months);
+  if (d.getDate() < day) d.setDate(0);
+  return d;
+}
+
+function calcNextDueDate(fromDate: Date, periodicity: string | null | undefined) {
+  const p = String(periodicity ?? "").trim().toUpperCase();
+
+  if (p === "SEMESTRALE") return addMonths(fromDate, 6);
+  if (p === "ANNUALE") return addMonths(fromDate, 12);
+  if (p === "BIENNALE") return addMonths(fromDate, 24);
+  if (p === "TRIENNALE") return addMonths(fromDate, 36);
+  if (p === "QUINQUENNALE") return addMonths(fromDate, 60);
+
+  return addMonths(fromDate, 12);
 }
 
 export default async function EditClientServicePage({
@@ -55,6 +74,48 @@ export default async function EditClientServicePage({
       orderBy: { name: "asc" },
     }),
   ]);
+
+  async function markDoneLocal(formData: FormData) {
+    "use server";
+
+    const { prisma } = await import("@/lib/prisma");
+
+    const safeClientId = String(formData.get("clientId") ?? "").trim();
+    const safeClientServiceId = String(formData.get("clientServiceId") ?? "").trim();
+    const redirectPath =
+      String(formData.get("redirectPath") ?? "").trim() || `/clients/${safeClientId}`;
+
+    if (!safeClientId || !safeClientServiceId) {
+      redirect(redirectPath);
+    }
+
+    const current = await prisma.clientService.findUnique({
+      where: { id: safeClientServiceId },
+      select: {
+        id: true,
+        clientId: true,
+        periodicity: true,
+      },
+    });
+
+    if (!current || current.clientId !== safeClientId) {
+      redirect(redirectPath);
+    }
+
+    const doneAt = new Date();
+    const nextDueDate = calcNextDueDate(doneAt, current.periodicity);
+
+    await prisma.clientService.update({
+      where: { id: safeClientServiceId },
+      data: {
+        status: "SVOLTO",
+        lastDoneAt: doneAt,
+        dueDate: nextDueDate,
+      },
+    });
+
+    redirect(redirectPath);
+  }
 
   async function updateCS(formData: FormData) {
     "use server";
@@ -192,7 +253,7 @@ export default async function EditClientServicePage({
           </div>
         </div>
 
-        <form action={markClientServiceDone} className="row" style={{ marginTop: 10, gap: 8 }}>
+        <form action={markDoneLocal} className="row" style={{ marginTop: 10, gap: 8 }}>
           <input type="hidden" name="clientId" value={clientId} />
           <input type="hidden" name="clientServiceId" value={clientServiceId} />
           <input type="hidden" name="redirectPath" value={`/clients/${clientId}`} />

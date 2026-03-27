@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 function toNum(v: any): number {
   if (v == null) return 0;
   const s = typeof v === "number" ? String(v) : String(v?.toString?.() ?? v);

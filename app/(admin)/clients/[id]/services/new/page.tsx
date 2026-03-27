@@ -8,6 +8,9 @@ import {
   upsertServiceCatalogByNameInsensitive,
 } from "@/app/actions/serviceCatalog";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const STATI = ["DA_FARE", "SVOLTO", "IN_CORSO", "SOSPESO"] as const;
 const PRIORITA = ["BASSA", "MEDIA", "ALTA"] as const;
 const PERIODICITA = ["ANNUALE", "SEMESTRALE", "BIENNALE", "TRIENNALE", "QUINQUENNALE"] as const;
@@ -27,13 +30,15 @@ export default async function NewClientServicePage({
   const client = await prisma.client.findUnique({ where: { id: params.id } });
   if (!client) redirect("/clients");
 
+  const clientId = client.id;
+
   const [servicesRaw, sites] = await Promise.all([
     prisma.serviceCatalog.findMany({
       where: { isActive: true },
       orderBy: { name: "asc" },
     }),
     prisma.clientSite.findMany({
-      where: { clientId: params.id },
+      where: { clientId },
       orderBy: { name: "asc" },
     }),
   ]);
@@ -50,7 +55,7 @@ export default async function NewClientServicePage({
   async function createCS(formData: FormData) {
     "use server";
 
-    const clientId = params.id;
+    const safeClientId = params.id;
 
     let serviceId = String(formData.get("serviceId") ?? "").trim();
     const otherServiceNameRaw = String(formData.get("otherServiceName") ?? "").trim();
@@ -103,9 +108,7 @@ export default async function NewClientServicePage({
     const rxEndoralCount = rxEndRaw ? Number(rxEndRaw) : null;
     const rxOptCount = rxOptRaw ? Number(rxOptRaw) : null;
 
-    const priceEur = priceRaw
-      ? new Prisma.Decimal(priceRaw.replace(",", "."))
-      : null;
+    const priceEur = priceRaw ? new Prisma.Decimal(priceRaw.replace(",", ".")) : null;
 
     let referenteName: string | null = null;
     if (isRxSelected) {
@@ -126,7 +129,7 @@ export default async function NewClientServicePage({
 
     await prisma.clientService.create({
       data: {
-        clientId,
+        clientId: safeClientId,
         serviceId,
         siteId,
         dueDate: dueDateRaw ? new Date(dueDateRaw) : null,
@@ -144,7 +147,7 @@ export default async function NewClientServicePage({
       } as any,
     });
 
-    redirect(`/clients/${clientId}`);
+    redirect(`/clients/${safeClientId}`);
   }
 
   return (
@@ -154,7 +157,7 @@ export default async function NewClientServicePage({
         style={{ justifyContent: "space-between", alignItems: "center" }}
       >
         <h1>Nuovo mantenimento</h1>
-        <Link className="btn" href={`/clients/${params.id}`}>
+        <Link className="btn" href={`/clients/${clientId}`}>
           ← Torna al cliente
         </Link>
       </div>
@@ -322,7 +325,7 @@ export default async function NewClientServicePage({
           <button className="btn primary" type="submit">
             Salva
           </button>
-          <Link className="btn" href={`/clients/${params.id}`}>
+          <Link className="btn" href={`/clients/${clientId}`}>
             Annulla
           </Link>
         </div>

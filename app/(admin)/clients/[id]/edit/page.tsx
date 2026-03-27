@@ -2,6 +2,9 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const TYPES = [
   "STUDIO_ODONTOIATRICO",
   "STUDIO_ODONT_447",
@@ -34,8 +37,10 @@ export default async function EditClientPage({
     where: { id: params.id },
     include: { contacts: true },
   });
+
   if (!client) return notFound();
 
+  const clientId = client.id;
   const primaryContact = client.contacts?.[0] ?? null;
 
   async function updateClient(formData: FormData) {
@@ -157,7 +162,7 @@ export default async function EditClientPage({
         style={{ justifyContent: "space-between", alignItems: "center" }}
       >
         <h1>Modifica cliente</h1>
-        <Link className="btn" href={`/clients/${client.id}`}>
+        <Link className="btn" href={`/clients/${clientId}`}>
           ← Torna al cliente
         </Link>
       </div>
@@ -343,7 +348,7 @@ export default async function EditClientPage({
             <button className="btn primary" type="submit">
               Salva
             </button>
-            <Link className="btn" href={`/clients/${client.id}`}>
+            <Link className="btn" href={`/clients/${clientId}`}>
               Annulla
             </Link>
           </div>

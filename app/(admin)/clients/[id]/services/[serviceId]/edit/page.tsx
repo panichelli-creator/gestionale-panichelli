@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { markClientServiceDone } from "@/app/actions/clientServices";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const STATI = ["DA_FARE", "SVOLTO", "IN_CORSO", "SOSPESO", "FATTURATO"] as const;
 const PRIORITA = ["BASSA", "MEDIA", "ALTA"] as const;
 const PERIODICITA = ["ANNUALE", "SEMESTRALE", "BIENNALE", "TRIENNALE", "QUINQUENNALE"] as const;

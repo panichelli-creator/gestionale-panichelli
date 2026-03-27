@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,6 +75,7 @@ export default async function ClinicalEngineeringDetailPage({
 }: {
   params: { id: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const item = await prisma.clinicalEngineeringCheck.findUnique({
     where: { id: params.id },
     include: { client: true, site: true as any },

@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/prisma";
 import CheckForm from "@/components/ingegneria-clinica/CheckForm";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +12,8 @@ type PageProps = {
 export default async function NewClinicalEngineeringPage({
   searchParams,
 }: PageProps) {
+  const { prisma } = await import("@/lib/prisma");
+
   const selectedClientId = String(searchParams?.clientId ?? "").trim();
 
   const clients = await prisma.client.findMany({

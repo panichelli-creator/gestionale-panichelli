@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 import { Prisma } from "@prisma/client";
 import { markClientServiceDone } from "@/app/actions/clientServices";
 
@@ -33,6 +33,7 @@ export default async function EditClientServicePage({
   params: { id: string; serviceId: string };
   searchParams?: { err?: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const cs = await prisma.clientService.findUnique({
     where: { id: params.serviceId },
     include: { client: true, service: true, site: true },

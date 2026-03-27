@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import {
   ensureLegionellaService,
@@ -24,6 +23,7 @@ export default async function NewClientServicePage({
 }: {
   params: { id: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   await ensureLegionellaService();
   await ensureInvioRegioneLazioService();
 

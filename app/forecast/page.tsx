@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -11,6 +10,7 @@ function euro(n: any) {
 }
 
 export default async function ForecastPage() {
+  const { prisma } = await import("@/lib/prisma");
   const services = await prisma.clientService.findMany({
     include: { client: true, service: true },
   });

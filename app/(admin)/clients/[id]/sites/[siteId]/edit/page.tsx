@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,6 +12,7 @@ export default async function EditClientSitePage({
   params: { id: string; siteId: string };
   searchParams?: { err?: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const site = await prisma.clientSite.findUnique({
     where: { id: params.siteId },
     include: {

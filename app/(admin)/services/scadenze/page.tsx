@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,6 +33,7 @@ function euro(n: any) {
 }
 
 export default async function MantenimentiPage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const q = (searchParams.q ?? "").trim();
   const clientId = (searchParams.clientId ?? "").trim();
   const serviceId = (searchParams.serviceId ?? "").trim();

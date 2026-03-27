@@ -2,7 +2,6 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 
 type SP = {
@@ -81,6 +80,7 @@ function renderSitesCell(
 }
 
 export default async function ClientsPage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const session = getSession();
   const isIngegnereClinico = session?.role === "ingegnere_clinico";
 

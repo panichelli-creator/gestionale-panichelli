@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -225,6 +225,7 @@ export default async function PracticeDetailPage({
 }: {
   params: { id: string; practiceId: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const p = await prisma.clientPractice.findUnique({
     where: { id: params.practiceId },
     include: { client: true },

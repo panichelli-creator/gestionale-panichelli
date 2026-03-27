@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -210,6 +210,7 @@ function extractPracticePayments(p: any) {
 }
 
 export default async function WorkReportPage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const ym = (searchParams.ym ?? defaultYm()).trim();
   const q = (searchParams.q ?? "").trim().toLowerCase();
   const clientId = (searchParams.clientId ?? "TUTTI").trim();

@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
@@ -8,13 +7,13 @@ export const revalidate = 0;
 async function bulkUpdate(formData: FormData) {
   "use server";
 
+  const { prisma } = await import("@/lib/prisma");
+
   const serviceId = String(formData.get("serviceId") || "");
-  const status = String(formData.get("status") || "ATTIVO"); // per default solo attivi
+  const status = String(formData.get("status") || "ATTIVO");
   const setPriceStr = String(formData.get("setPrice") || "").replace(",", ".").trim();
   const setPeriodicity = String(formData.get("setPeriodicity") || "").trim();
   const setAlertMonthsStr = String(formData.get("setAlertMonths") || "").trim();
-
-  // Opzionale: sposta tutte le scadenze di +N mesi (es. +12)
   const shiftMonthsStr = String(formData.get("shiftMonths") || "").trim();
 
   if (!serviceId) throw new Error("Seleziona un servizio.");
@@ -24,18 +23,15 @@ async function bulkUpdate(formData: FormData) {
   if (setPeriodicity) data.periodicity = setPeriodicity;
   if (setAlertMonthsStr) data.alertMonths = Number(setAlertMonthsStr);
 
-  // Aggiorna righe
   const where: any = {
     serviceId,
   };
   if (status !== "TUTTI") where.client = { status };
 
-  // 1) update semplice su campi
   if (Object.keys(data).length > 0) {
     await prisma.clientService.updateMany({ where, data });
   }
 
-  // 2) shift scadenze (se richiesto)
   const shiftMonths = shiftMonthsStr ? Number(shiftMonthsStr) : 0;
   if (shiftMonths && Number.isFinite(shiftMonths)) {
     const rows = await prisma.clientService.findMany({
@@ -58,6 +54,8 @@ async function bulkUpdate(formData: FormData) {
 }
 
 export default async function BulkServicesPage() {
+  const { prisma } = await import("@/lib/prisma");
+
   const services = await prisma.serviceCatalog.findMany({
     where: { isActive: true },
     orderBy: { name: "asc" },

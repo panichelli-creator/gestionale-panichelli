@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -6,6 +5,8 @@ export const revalidate = 0;
 
 async function createClient(formData: FormData) {
   "use server";
+
+  const { prisma } = await import("@/lib/prisma");
 
   const name = String(formData.get("name") || "").trim();
   const type = String(formData.get("type") || "ALTRO");
@@ -15,13 +16,11 @@ async function createClient(formData: FormData) {
   const occupationalDoctorName =
     String(formData.get("occupationalDoctorName") || "").trim() || null;
 
-  // 🔴 NUOVO → CONTATTO REFERENTE
   const contactName = String(formData.get("contactName") || "").trim();
   const contactPhone = String(formData.get("contactPhone") || "").trim() || null;
   const contactEmail = String(formData.get("contactEmail") || "").trim() || null;
   const contactRole = String(formData.get("contactRole") || "").trim() || "REFERENTE";
 
-  // 🔴 NUOVO → LISTA MARKETING
   const marketingList = String(formData.get("marketingList") || "").trim() || null;
 
   if (!name) throw new Error("Nome obbligatorio");
@@ -34,8 +33,6 @@ async function createClient(formData: FormData) {
       email,
       pec,
       occupationalDoctorName,
-
-      // 🔴 CREA SUBITO CONTATTO
       contacts: contactName
         ? {
             create: {
@@ -43,7 +40,6 @@ async function createClient(formData: FormData) {
               phone: contactPhone,
               email: contactEmail,
               role: contactRole,
-              // se hai campo lista marketing lo agganciamo
               ...(marketingList ? { marketingList } : {}),
             },
           }
@@ -106,7 +102,6 @@ export default async function NewClientPage() {
           </div>
         </div>
 
-        {/* 🔴 NUOVO BLOCCO REFERENTE */}
         <div className="card" style={{ marginTop: 12 }}>
           <h2 style={{ marginBottom: 10 }}>Referente / Contatto</h2>
 
@@ -137,7 +132,6 @@ export default async function NewClientPage() {
               <input className="input" name="contactEmail" />
             </div>
 
-            {/* 🔴 LISTA MARKETING DIRETTA */}
             <div>
               <label>Lista marketing</label>
               <select className="input" name="marketingList">

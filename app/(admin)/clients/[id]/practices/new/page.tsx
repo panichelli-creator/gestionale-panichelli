@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function NewPracticePage({ params }: { params: { id: string } }) {
+export default async function NewPracticePage({
+  params,
+}: { params: { id: string } }) {
+  const { prisma } = await import("@/lib/prisma");
   const client = await prisma.client.findUnique({ where: { id: params.id } });
   if (!client) return notFound();
 

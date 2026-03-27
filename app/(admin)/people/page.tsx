@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { IconUsers, IconPlus, IconSearch } from "@/app/ui/icons";
 
@@ -79,6 +78,7 @@ function dueBadge(dueDate: Date | null | undefined) {
 }
 
 export default async function PeoplePage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const qRaw = (searchParams.q ?? "").trim();
   const q = qRaw;
   const clientId = (searchParams.clientId ?? "TUTTI").trim();

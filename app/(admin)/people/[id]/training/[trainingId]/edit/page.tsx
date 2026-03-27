@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +56,7 @@ export default async function EditTrainingForPerson({
   params: { id: string; trainingId: string };
   searchParams?: SP;
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const training = await prisma.trainingRecord.findUnique({
     where: { id: params.trainingId },
     include: {

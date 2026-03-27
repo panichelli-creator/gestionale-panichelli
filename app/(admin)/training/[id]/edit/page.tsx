@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 import { Prisma } from "@prisma/client";
 import BackButton from "../../BackButton";
 
@@ -19,7 +19,10 @@ function toISODateInput(d: Date | null) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-export default async function EditTrainingRecordPage({ params }: { params: { id: string } }) {
+export default async function EditTrainingRecordPage({
+  params,
+}: { params: { id: string } }) {
+  const { prisma } = await import("@/lib/prisma");
   const rec = await prisma.trainingRecord.findUnique({
     where: { id: params.id },
     include: {

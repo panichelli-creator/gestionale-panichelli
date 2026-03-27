@@ -13,7 +13,8 @@
     "reset-user": "tsx scripts/reset-user.ts",
     "fix:dynamic": "node scripts/fix-dynamic.js",
     "fix:broken": "node scripts/fix-broken-routes.js",
-    "fix:pages": "node scripts/fix-pages-prisma.js"
+    "fix:pages": "node scripts/fix-pages-prisma.js",
+    "fix:broken-pages": "node scripts/fix-broken-pages.js"
   },
   "dependencies": {
     "@prisma/client": "5.18.0",

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,6 +15,7 @@ export default async function ContactsPage({
     service?: string;
   };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const q = String(searchParams?.q ?? "").trim();
   const role = String(searchParams?.role ?? "").trim();
   const marketingList = String(searchParams?.marketingList ?? "").trim();

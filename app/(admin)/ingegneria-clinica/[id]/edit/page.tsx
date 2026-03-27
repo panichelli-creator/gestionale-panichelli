@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
 import CheckForm from "@/components/ingegneria-clinica/CheckForm";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +9,7 @@ export default async function EditIngegneriaClinicaPage({
 }: {
   params: { id: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const id = String(params.id);
 
   const item = await prisma.clinicalEngineeringCheck.findUnique({

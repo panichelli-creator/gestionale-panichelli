@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -131,7 +130,7 @@ function inRange(d: Date | null, start: Date, end: Date) {
   return t >= start.getTime() && t < end.getTime();
 }
 
-async function loadRowsFromAnyDelegate(delegateNames: string[]) {
+async function loadRowsFromAnyDelegate(prisma: any, delegateNames: string[]) {
   const db = prisma as any;
 
   for (const name of delegateNames) {
@@ -341,6 +340,7 @@ function calcVseRevenue(rows: any[], range: { start: Date; end: Date }) {
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const now = new Date();
   const defaultYear = now.getFullYear();
 
@@ -441,7 +441,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
       })
     : Promise.resolve([]);
 
-  const vseRowsPromise = loadRowsFromAnyDelegate([
+  const vseRowsPromise = loadRowsFromAnyDelegate(prisma, [
     "clinicalCheck",
     "clinicalChecks",
     "clinicalVerification",
@@ -456,7 +456,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
     "verifications",
   ]);
 
-  const practiceRowsPromise = loadRowsFromAnyDelegate([
+  const practiceRowsPromise = loadRowsFromAnyDelegate(prisma, [
     "practice",
     "practices",
     "clientPractice",

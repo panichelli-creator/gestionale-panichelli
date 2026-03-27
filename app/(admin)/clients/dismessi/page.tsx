@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,6 +13,7 @@ function pill(text: string) {
 }
 
 export default async function ClientsDismissedPage() {
+  const { prisma } = await import("@/lib/prisma");
   const clients = await prisma.client.findMany({
     where: { status: "DISMESSO" },
     orderBy: { name: "asc" },

@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +89,7 @@ export default async function ClientDetailPage({
 }: {
   params: { id: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const session = getSession();
   const isIngegnereClinico = session?.role === "ingegnere_clinico";
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 import BackButton from "../BackButton";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +22,7 @@ export default async function PersonDetailPage({
   params: { id: string };
   searchParams: SP;
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const person = await prisma.person.findUnique({
     where: { id: params.id },
     include: {

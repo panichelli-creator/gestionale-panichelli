@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
 import PrintButton from "./PrintButton";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +49,7 @@ function fmt(d: Date | null) {
 }
 
 export default async function TrainingPage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const q = (searchParams.q ?? "").trim();
   const courseId = (searchParams.courseId ?? "TUTTI").trim();
   const clientId = (searchParams.clientId ?? "TUTTI").trim();

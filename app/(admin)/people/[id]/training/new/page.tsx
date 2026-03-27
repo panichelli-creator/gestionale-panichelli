@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +42,7 @@ export default async function NewPersonTrainingPage({
   params: { id: string };
   searchParams?: SP;
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const person = await prisma.person.findUnique({
     where: { id: params.id },
     select: { id: true, firstName: true, lastName: true },

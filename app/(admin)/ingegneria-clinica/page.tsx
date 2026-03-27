@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 import { getSession } from "@/lib/session";
 import ChecksTableClient from "@/components/ingegneria-clinica/ChecksTableClient";
 
@@ -86,6 +86,7 @@ export default async function ClinicalEngineeringPage({
 }: {
   searchParams?: SP;
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const session = getSession();
   const isIngegnereClinico = session?.role === "ingegnere_clinico";
 

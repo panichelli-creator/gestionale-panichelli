@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 import { markClientServiceDone, markClientServiceWorked } from "@/app/actions/clientServices";
 import PrintButton from "./PrintButton";
 import ConfirmSubmitButton from "./ConfirmSubmitButton";
@@ -60,6 +60,7 @@ function getSiteLabel(row: any) {
 }
 
 export default async function MonthlyWorkPage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const now = new Date();
   const defaultYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const ym = (searchParams.ym ?? defaultYm).trim();

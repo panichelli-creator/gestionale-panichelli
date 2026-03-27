@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -10,6 +10,7 @@ export default async function DeleteTrainingPage({
 }: {
   params: { id: string; trainingId: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const training = await prisma.trainingRecord.findUnique({
     where: { id: params.trainingId },
     include: {

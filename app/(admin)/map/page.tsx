@@ -2,7 +2,6 @@ import Link from "next/link";
 import dynamicImport from "next/dynamic";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,7 +75,6 @@ function normalizePlanStatus(value: string | null | undefined): PlanStatus {
   if (raw === "RINVIATO_DA_LORO") return "RINVIATO_DA_LORO";
   if (raw === "RINVIATO_DA_NOI") return "RINVIATO_DA_NOI";
 
-  // compatibilità con vecchi record
   if (raw === "RINVIATO") return "RINVIATO_DA_LORO";
 
   return "DA_FARE";
@@ -84,6 +82,8 @@ function normalizePlanStatus(value: string | null | undefined): PlanStatus {
 
 async function saveMapPlanItem(formData: FormData) {
   "use server";
+
+  const { prisma } = await import("@/lib/prisma");
 
   const ym = String(formData.get("ym") ?? "").trim();
   const clientServiceId = String(formData.get("clientServiceId") ?? "").trim();
@@ -519,6 +519,7 @@ export default async function MapPage({
 }: {
   searchParams?: SP;
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const ym = safeYm(searchParams?.ym);
   const service = String(searchParams?.service ?? "").trim();
 

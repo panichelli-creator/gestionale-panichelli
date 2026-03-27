@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -20,6 +20,7 @@ function monthRange(ym: string) {
 }
 
 export default async function TrainingScadenzePage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const month = (searchParams.month ?? new Date().toISOString().slice(0, 7)).trim();
   const courseId = (searchParams.courseId ?? "").trim();
   const q = (searchParams.q ?? "").trim();

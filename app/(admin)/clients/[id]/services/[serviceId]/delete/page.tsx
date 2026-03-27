@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +11,7 @@ export default async function DeleteClientServicePage({
 }: {
   params: { id: string; serviceId: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const clientId = params.id;
   const clientServiceId = params.serviceId;
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+
 import PrintButton from "./PrintButton";
 
 export const dynamic = "force-dynamic";
@@ -124,6 +124,7 @@ function buildMaintenanceHref(params: {
 }
 
 export default async function MaintenancePage({ searchParams }: { searchParams: SP }) {
+  const { prisma } = await import("@/lib/prisma");
   const q = (searchParams.q ?? "").trim();
   const serviceId = (searchParams.serviceId ?? "TUTTI").trim();
   const status = (searchParams.status ?? "TUTTI").trim();

@@ -3,7 +3,7 @@ export const revalidate = 0;
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+
 
 function fmtDate(d: Date | null | undefined) {
   return d ? new Date(d).toLocaleDateString("it-IT") : "—";
@@ -32,6 +32,7 @@ export default async function ClientSiteDetailPage({
 }: {
   params: { id: string; siteId: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
   const site = await prisma.clientSite.findUnique({
     where: { id: params.siteId },
     include: {

@@ -1,12 +1,16 @@
 import Link from "next/link";
-import { importPeopleFromCsv } from "@/app/actions/importExport";
-import { importTrainingFromCsv } from "@/app/actions/importTraining";
 import ExportButtons from "./ExportButtons";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 function ImportTrainingCard({ title, courseName }: { title: string; courseName: string }) {
+  async function action(formData: FormData) {
+    "use server";
+    const { importTrainingFromCsv } = await import("@/app/actions/importTraining");
+    return importTrainingFromCsv(courseName, formData);
+  }
+
   return (
     <div className="card" style={{ marginTop: 12 }}>
       <h2>{title}</h2>
@@ -14,7 +18,7 @@ function ImportTrainingCard({ title, courseName }: { title: string; courseName: 
         Carica il CSV (delimiter <b>;</b>). Header diversi ok.
       </div>
 
-      <form action={importTrainingFromCsv.bind(null, courseName)} className="card" style={{ marginTop: 12 }}>
+      <form action={action} className="card" style={{ marginTop: 12 }}>
         <div>
           <label>File CSV</label>
           <input className="input" type="file" name="file" accept=".csv,text/csv" required />
@@ -30,6 +34,12 @@ function ImportTrainingCard({ title, courseName }: { title: string; courseName: 
 }
 
 export default async function ImportExportPage() {
+  async function importPeopleAction(formData: FormData) {
+    "use server";
+    const { importPeopleFromCsv } = await import("@/app/actions/importExport");
+    return importPeopleFromCsv(formData);
+  }
+
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -41,6 +51,8 @@ export default async function ImportExportPage() {
         </div>
       </div>
 
+      <ExportButtons />
+
       {/* IMPORT PERSONE */}
       <div className="card" style={{ marginTop: 12 }}>
         <h2>Import Persone (CSV)</h2>
@@ -48,7 +60,7 @@ export default async function ImportExportPage() {
           Carica il file <b>PERSONALE.csv</b> (delimiter <b>;</b>). Header diversi ok.
         </div>
 
-        <form action={importPeopleFromCsv} className="card" style={{ marginTop: 12 }}>
+        <form action={importPeopleAction} className="card" style={{ marginTop: 12 }}>
           <div>
             <label>File CSV</label>
             <input className="input" type="file" name="file" accept=".csv,text/csv" required />
@@ -88,9 +100,6 @@ export default async function ImportExportPage() {
       <ImportTrainingCard title="SPEC Basso" courseName="SPEC BASSO" />
       <ImportTrainingCard title="SPEC Medio" courseName="SPEC MEDIO" />
       <ImportTrainingCard title="SPEC Alto" courseName="SPEC ALTO" />
-
-      {/* EXPORT */}
-      <ExportButtons />
     </div>
   );
 }

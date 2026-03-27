@@ -1,5 +1,8 @@
 import { loginAction } from "@/app/actions/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default function LoginPage() {
   return (
     <div className="card" style={{ maxWidth: 520, margin: "40px auto" }}>

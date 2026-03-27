@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type SP = {
   month?: string;   // formato YYYY-MM (es. 2026-03)
   courseId?: string;

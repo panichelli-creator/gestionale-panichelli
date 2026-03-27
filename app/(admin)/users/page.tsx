@@ -3,6 +3,9 @@ import { createOrUpdateUser, listUsers } from "@/app/actions/users";
 import DeleteUserButton from "./DeleteUserButton";
 import { IconPlus, IconUsers } from "@/app/ui/icons";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function roleLabel(role: string) {
   if (role === "admin") return "Socio (admin)";
   if (role === "ingegnere_clinico") return "Ingegnere Clinico";

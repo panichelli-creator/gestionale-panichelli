@@ -3,6 +3,9 @@ import { importPeopleFromCsv } from "@/app/actions/importExport";
 import { importTrainingFromCsv } from "@/app/actions/importTraining";
 import ExportButtons from "./ExportButtons";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function ImportTrainingCard({ title, courseName }: { title: string; courseName: string }) {
   return (
     <div className="card" style={{ marginTop: 12 }}>

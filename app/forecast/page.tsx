@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function euro(n: any) {
   if (n == null) return "€0";
   const v = Number(n);

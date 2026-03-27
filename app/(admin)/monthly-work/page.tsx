@@ -4,6 +4,9 @@ import { markClientServiceDone, markClientServiceWorked } from "@/app/actions/cl
 import PrintButton from "./PrintButton";
 import ConfirmSubmitButton from "./ConfirmSubmitButton";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type SP = {
   ym?: string;
   serviceId?: string;

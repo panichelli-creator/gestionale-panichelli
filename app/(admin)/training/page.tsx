@@ -2,6 +2,9 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import PrintButton from "./PrintButton";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type SP = {
   q?: string;
   courseId?: string;

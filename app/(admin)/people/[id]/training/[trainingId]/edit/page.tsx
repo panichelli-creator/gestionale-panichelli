@@ -3,6 +3,9 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const STATI = ["DA_FARE", "SVOLTO", "IN_CORSO", "SOSPESO"] as const;
 const PRIORITA = ["BASSA", "MEDIA", "ALTA"] as const;
 

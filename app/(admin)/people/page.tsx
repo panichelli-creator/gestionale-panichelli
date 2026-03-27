@@ -3,6 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { IconUsers, IconPlus, IconSearch } from "@/app/ui/icons";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type SP = {
   q?: string;
   clientId?: string;

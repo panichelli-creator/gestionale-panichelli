@@ -1,5 +1,7 @@
-import { prisma } from "@/lib/prisma";
+﻿import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
 
 function startOfTodayLocal() {
   const d = new Date();
@@ -18,7 +20,7 @@ export async function GET() {
   const in7 = addDays(today, 7);
   const in30 = addDays(today, 30);
 
-  // ✅ 0–7 giorni
+  // âœ… 0â€“7 giorni
   const maintenance7 = await prisma.clientService.count({
     where: {
       dueDate: {
@@ -28,7 +30,7 @@ export async function GET() {
     },
   });
 
-  // ✅ 0–30 giorni
+  // âœ… 0â€“30 giorni
   const maintenance30 = await prisma.clientService.count({
     where: {
       dueDate: {
@@ -39,7 +41,7 @@ export async function GET() {
   });
 
   return NextResponse.json({
-    maintenance: maintenance30, // compatibilità con vecchio codice
+    maintenance: maintenance30, // compatibilitÃ  con vecchio codice
     maintenance7,
     maintenance30,
   });

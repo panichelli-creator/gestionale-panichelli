@@ -1,11 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
-import {
-  ensureLegionellaService,
-  ensureInvioRegioneLazioService,
-  upsertServiceCatalogByNameInsensitive,
-} from "@/app/actions/serviceCatalog";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,6 +19,11 @@ export default async function NewClientServicePage({
   params: { id: string };
 }) {
   const { prisma } = await import("@/lib/prisma");
+  const {
+    ensureLegionellaService,
+    ensureInvioRegioneLazioService,
+  } = await import("@/app/actions/serviceCatalog");
+
   await ensureLegionellaService();
   await ensureInvioRegioneLazioService();
 
@@ -54,6 +54,9 @@ export default async function NewClientServicePage({
 
   async function createCS(formData: FormData) {
     "use server";
+
+    const { prisma } = await import("@/lib/prisma");
+    const { upsertServiceCatalogByNameInsensitive } = await import("@/app/actions/serviceCatalog");
 
     const safeClientId = params.id;
 

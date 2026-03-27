@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -14,6 +13,8 @@ export default async function DeletePracticePage({
 }: {
   params: { id: string; practiceId: string };
 }) {
+  const { prisma } = await import("@/lib/prisma");
+
   const p = await prisma.clientPractice.findUnique({
     where: { id: params.practiceId },
     include: { client: true },
@@ -24,6 +25,8 @@ export default async function DeletePracticePage({
 
   async function deletePractice() {
     "use server";
+
+    const { prisma } = await import("@/lib/prisma");
 
     const clientId = params.id;
     const practiceId = params.practiceId;

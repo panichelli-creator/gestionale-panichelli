@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,6 +38,8 @@ export default async function ClientContactsPage({
   params: { id: string };
   searchParams?: SP;
 }) {
+  const { prisma } = await import("@/lib/prisma");
+
   const client = await prisma.client.findUnique({
     where: { id: params.id },
     include: { contacts: { orderBy: { name: "asc" } } },
@@ -68,6 +69,8 @@ export default async function ClientContactsPage({
 
   async function createContact(formData: FormData) {
     "use server";
+
+    const { prisma } = await import("@/lib/prisma");
 
     const clientId = params.id;
     const returnToForm = String(formData.get("returnTo") ?? "").trim();
@@ -110,6 +113,8 @@ export default async function ClientContactsPage({
 
   async function updateContact(formData: FormData) {
     "use server";
+
+    const { prisma } = await import("@/lib/prisma");
 
     const clientId = params.id;
     const returnToForm = String(formData.get("returnTo") ?? "").trim();
@@ -163,6 +168,8 @@ export default async function ClientContactsPage({
 
   async function deleteContact(formData: FormData) {
     "use server";
+
+    const { prisma } = await import("@/lib/prisma");
 
     const clientId = params.id;
     const returnToForm = String(formData.get("returnTo") ?? "").trim();

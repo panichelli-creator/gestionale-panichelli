@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function csvCell(v: string) {
   const s = String(v ?? "");
@@ -10,6 +10,8 @@ function csvCell(v: string) {
 
 export async function GET(req: Request) {
   try {
+    const { prisma } = await import("@/lib/prisma");
+
     const { searchParams } = new URL(req.url);
 
     const q = String(searchParams.get("q") ?? "").trim();
@@ -30,11 +32,8 @@ export async function GET(req: Request) {
                 ],
               }
             : {},
-
           role ? { role } : {},
-
           marketingList ? { marketingList } : {},
-
           type
             ? {
                 client: {
@@ -42,7 +41,6 @@ export async function GET(req: Request) {
                 },
               }
             : {},
-
           service
             ? {
                 client: {
@@ -58,17 +56,14 @@ export async function GET(req: Request) {
             : {},
         ],
       },
-
       include: {
         client: true,
       },
-
       orderBy: [{ marketingList: "asc" }, { role: "asc" }, { name: "asc" }],
     });
 
     const rows = [
       ["email", "nome", "ruolo", "lista_marketing", "cliente", "telefono", "tipo_struttura"],
-
       ...contacts.map((c) => [
         c.email ?? "",
         c.name ?? "",
@@ -88,7 +83,10 @@ export async function GET(req: Request) {
         "Content-Disposition": 'attachment; filename="voxmail-contatti.csv"',
       },
     });
-  } catch (e) {
-    return new NextResponse("Errore export contatti", { status: 500 });
+  } catch (e: any) {
+    return new NextResponse(
+      String(e?.message ?? "Errore export contatti"),
+      { status: 500 }
+    );
   }
 }

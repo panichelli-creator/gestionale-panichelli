@@ -6,8 +6,6 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // teniamo la sessione qui se ti serve in futuro,
-  // ma per ora NON renderizziamo la topbar globale
   getSession();
 
   return (

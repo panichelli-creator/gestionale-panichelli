@@ -1,6 +1,5 @@
 "use server";
 
-import { prisma } from "@/lib/prisma";
 import { setSessionCookie, clearSessionCookie } from "@/lib/session";
 import { verifyPassword } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -16,9 +15,7 @@ function passwordMatches(inputPassword: string, storedPassword: string) {
 
   try {
     if (verifyPassword(inputPassword, stored)) return true;
-  } catch {
-    // fallback sotto
-  }
+  } catch {}
 
   if (inputPassword === stored) return true;
   if (inputPassword.trim() === stored) return true;
@@ -27,6 +24,8 @@ function passwordMatches(inputPassword: string, storedPassword: string) {
 }
 
 export async function loginAction(formData: FormData) {
+  const { prisma } = await import("@/lib/prisma");
+
   const usernameRaw = norm(String(formData.get("username") ?? ""));
   const username = usernameRaw.toLowerCase();
   const password = String(formData.get("password") ?? "");

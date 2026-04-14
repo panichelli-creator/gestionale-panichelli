@@ -64,7 +64,6 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
   const today0 = startOfTodayLocal();
   const next30End = endOfDay(addDays(today0, 30));
 
-  // ===== WHERE righe =====
   const where: any = {};
 
   if (bucket) {
@@ -95,17 +94,13 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
   if (q || clientId !== "TUTTI") {
     where.person = {};
     if (q) {
-      where.person.OR = [
-        { lastName: { contains: q } },
-        { firstName: { contains: q } },
-      ];
+      where.person.OR = [{ lastName: { contains: q } }, { firstName: { contains: q } }];
     }
     if (clientId !== "TUTTI") {
       where.person.clientId = clientId;
     }
   }
 
-  // ===== WHERE conteggi card (rispetta filtri base, NON mese, NON bucket) =====
   const baseCountsWhere: any = {};
   if (cert === "SI") baseCountsWhere.certificateDelivered = true;
   if (cert === "NO") baseCountsWhere.certificateDelivered = false;
@@ -114,10 +109,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
   if (q || clientId !== "TUTTI") {
     baseCountsWhere.person = {};
     if (q) {
-      baseCountsWhere.person.OR = [
-        { lastName: { contains: q } },
-        { firstName: { contains: q } },
-      ];
+      baseCountsWhere.person.OR = [{ lastName: { contains: q } }, { firstName: { contains: q } }];
     }
     if (clientId !== "TUTTI") baseCountsWhere.person.clientId = clientId;
   }
@@ -134,8 +126,12 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
       }),
       prisma.trainingRecord.count({ where: { ...baseCountsWhere, status: "IN_CORSO" } }),
       prisma.trainingRecord.count({ where: { ...baseCountsWhere, dueDate: { lt: today0 } } }),
-      prisma.trainingRecord.count({ where: { ...baseCountsWhere, dueDate: { gte: today0, lte: next30End } } }),
-      prisma.trainingRecord.count({ where: { ...baseCountsWhere, status: "SVOLTO", dueDate: { gt: next30End } } }),
+      prisma.trainingRecord.count({
+        where: { ...baseCountsWhere, dueDate: { gte: today0, lte: next30End } },
+      }),
+      prisma.trainingRecord.count({
+        where: { ...baseCountsWhere, status: "SVOLTO", dueDate: { gt: next30End } },
+      }),
     ]);
 
   const seen = new Set<string>();
@@ -170,6 +166,31 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
     return `/training?${p.toString()}`;
   }
 
+  const currentParams = new URLSearchParams();
+  if (q) currentParams.set("q", q);
+  if (courseId !== "TUTTI") currentParams.set("courseId", courseId);
+  if (clientId !== "TUTTI") currentParams.set("clientId", clientId);
+  if (status !== "TUTTI") currentParams.set("status", status);
+  if (cert !== "TUTTI") currentParams.set("cert", cert);
+  if (ym) currentParams.set("ym", ym);
+  if (bucket) currentParams.set("bucket", bucket);
+
+  const returnTo = `/training${currentParams.toString() ? `?${currentParams.toString()}` : ""}`;
+
+  function personHref(personId: string, rowClientId?: string | null) {
+    const p = new URLSearchParams();
+    if (rowClientId) p.set("clientId", rowClientId);
+    p.set("returnTo", returnTo);
+    return `/people/${personId}?${p.toString()}`;
+  }
+
+  function trainingEditHref(personId: string, trainingId: string, rowClientId?: string | null) {
+    const p = new URLSearchParams();
+    if (rowClientId) p.set("clientId", rowClientId);
+    p.set("returnTo", returnTo);
+    return `/people/${personId}/training/${trainingId}/edit?${p.toString()}`;
+  }
+
   return (
     <div className="card">
       <style>{`
@@ -185,11 +206,12 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
         <h1>Formazione</h1>
         <div className="row no-print" style={{ gap: 8 }}>
           <PrintButton />
-          <Link className="btn" href="/people">Persone</Link>
+          <Link className="btn" href="/people">
+            Persone
+          </Link>
         </div>
       </div>
 
-      {/* CARD (stile nuovo) */}
       <div className="grid3 no-print" style={{ marginTop: 12 }}>
         <Link href={hrefWithBucket("ATTIVI")} style={{ textDecoration: "none" }}>
           <div
@@ -269,10 +291,12 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
           </div>
         </Link>
 
-        <div className="card no-print" style={{ background: "transparent", border: "none", boxShadow: "none" }} />
+        <div
+          className="card no-print"
+          style={{ background: "transparent", border: "none", boxShadow: "none" }}
+        />
       </div>
 
-      {/* FILTRI */}
       <form method="GET" className="card no-print" style={{ marginTop: 12 }}>
         <div className="grid3">
           <div>
@@ -359,6 +383,9 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
             <th>Stato</th>
             <th>Priorità</th>
             <th>Attestato</th>
+            <th>Fatturata</th>
+            <th>Fatturata il</th>
+            <th className="no-print">Apri</th>
             <th>Note</th>
           </tr>
         </thead>
@@ -366,25 +393,34 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
           {rows.map((r: any) => {
             const due = r.dueDate ? new Date(r.dueDate) : null;
             const isExpired = due ? due.getTime() < today0.getTime() : false;
+            const rowClientId = r.person?.clientId ?? null;
 
             return (
-              <tr key={r.id} style={isExpired ? { color: "#ff3b30", fontWeight: 700 } : undefined}>
+              <tr
+                key={r.id}
+                style={isExpired ? { color: "#ff3b30", fontWeight: 700 } : undefined}
+              >
                 <td>
-                  <Link href={`/people/${r.personId}`}>
+                  <Link href={personHref(r.personId, rowClientId)}>
                     {r.person.lastName} {r.person.firstName}
                   </Link>
                 </td>
                 <td>{r.person.client?.name ?? "one-shot"}</td>
                 <td>
-                  <Link href={`/people/${r.personId}/training/${r.id}/edit`}>
-                    {r.course.name}
-                  </Link>
+                  <Link href={trainingEditHref(r.personId, r.id, rowClientId)}>{r.course.name}</Link>
                 </td>
                 <td>{fmt(r.performedAt ?? null)}</td>
                 <td>{fmt(r.dueDate ?? null)}</td>
                 <td>{r.status}</td>
                 <td>{r.priority}</td>
                 <td>{r.certificateDelivered ? "Sì" : "No"}</td>
+                <td>{r.fatturata ? "Sì" : "No"}</td>
+                <td>{fmt(r.fatturataAt ?? null)}</td>
+                <td className="no-print">
+                  <Link className="btn" href={trainingEditHref(r.personId, r.id, rowClientId)}>
+                    Apri
+                  </Link>
+                </td>
                 <td style={{ maxWidth: 360, whiteSpace: "normal", wordBreak: "break-word" }}>
                   {r.notes ?? ""}
                 </td>
@@ -394,7 +430,7 @@ export default async function TrainingPage({ searchParams }: { searchParams: SP 
 
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={9} className="muted">
+              <td colSpan={12} className="muted">
                 Nessun risultato per i filtri selezionati.
               </td>
             </tr>

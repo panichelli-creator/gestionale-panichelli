@@ -1,11 +1,17 @@
 "use client";
 
-import { deleteUser } from "@/app/actions/users";
-
-export default function DeleteUserButton({ id, username }: { id: string; username: string }) {
+export default function DeleteUserButton({
+  id,
+  username,
+  action,
+}: {
+  id: string;
+  username: string;
+  action: (formData: FormData) => void | Promise<void>;
+}) {
   return (
     <form
-      action={deleteUser}
+      action={action}
       style={{ margin: 0 }}
       onSubmit={(e) => {
         const ok = confirm(`Eliminare l’utente "${username}"?`);

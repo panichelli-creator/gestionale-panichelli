@@ -116,6 +116,7 @@ export default async function NewClientPage() {
               <select className="input" name="contactRole" defaultValue="REFERENTE">
                 <option value="REFERENTE">Referente</option>
                 <option value="TITOLARE">Titolare</option>
+                <option value="ASO">ASO</option>
                 <option value="SEGRETERIA">Segreteria</option>
                 <option value="AMMINISTRAZIONE">Amministrazione</option>
                 <option value="ALTRO">Altro</option>

@@ -48,21 +48,50 @@ model Client {
 }
 
 model ClientContact {
-  id            String   @id @default(cuid())
+  id            String                     @id @default(cuid())
   clientId      String
-  role          String   @default("ALTRO")
+  role          String                     @default("ALTRO")
   name          String
   email         String?
   phone         String?
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  marketingList String?  @default("ALTRO")
-  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  marketingList String?                    @default("ALTRO")
+  client        Client                     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  marketingMaps ClientContactMarketingList[]
 
   @@index([clientId])
   @@index([marketingList])
   @@index([role])
+}
+
+model MarketingList {
+  id          String                     @id @default(cuid())
+  name        String                     @unique
+  slug        String                     @unique
+  isSystem    Boolean                    @default(false)
+  isActive    Boolean                    @default(true)
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  contactMaps ClientContactMarketingList[]
+
+  @@index([name])
+  @@index([slug])
+  @@index([isActive])
+}
+
+model ClientContactMarketingList {
+  id             String        @id @default(cuid())
+  clientContactId String
+  marketingListId String
+  createdAt      DateTime      @default(now())
+  clientContact  ClientContact @relation(fields: [clientContactId], references: [id], onDelete: Cascade)
+  marketingList  MarketingList @relation(fields: [marketingListId], references: [id], onDelete: Cascade)
+
+  @@unique([clientContactId, marketingListId])
+  @@index([clientContactId])
+  @@index([marketingListId])
 }
 
 model ClientSite {
@@ -88,11 +117,11 @@ model ClientSite {
 }
 
 model ServiceCatalog {
-  id             String          @id @default(cuid())
-  name           String          @unique
-  isActive       Boolean         @default(true)
+  id             String       @id @default(cuid())
+  name           String       @unique
+  isActive       Boolean      @default(true)
   clientServices ClientService[]
-  workReports    WorkReport[]    @relation("WorkReportService")
+  workReports    WorkReport[] @relation("WorkReportService")
 }
 
 model ClientService {
@@ -235,6 +264,8 @@ model TrainingRecord {
   alertMonths          Int           @default(2)
   alertMonths2         Int           @default(3)
   certificateDelivered Boolean       @default(false)
+  fatturata            Boolean       @default(false)
+  fatturataAt          DateTime?
   notes                String?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
@@ -244,27 +275,61 @@ model TrainingRecord {
   @@unique([personId, courseId])
   @@index([dueDate])
   @@index([personId])
+  @@index([fatturata])
+  @@index([fatturataAt])
 }
 
 model ClientPractice {
-  id              String    @id @default(cuid())
+  id              String                @id @default(cuid())
   clientId        String
   title           String
   practiceDate    DateTime?
   determinaNumber String?
-  inApertureList  Boolean   @default(false)
+  inApertureList  Boolean               @default(false)
   notes           String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  apertureStatus  String?   @default("IN_ATTESA")
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  apertureStatus  String?               @default("IN_ATTESA")
   startYear       Int?
-  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  amountEur       Decimal?
+  fatturata       Boolean               @default(false)
+  fatturataAt     DateTime?
+  client          Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  billingSteps    PracticeBillingStep[]
 
   @@index([clientId])
   @@index([practiceDate])
   @@index([inApertureList])
   @@index([apertureStatus])
   @@index([startYear])
+  @@index([fatturata])
+  @@index([fatturataAt])
+}
+
+model PracticeBillingStep {
+  id            String         @id @default(cuid())
+  practiceId    String
+  sortOrder     Int            @default(0)
+  label         String
+  billingType   String         @default("ALTRO")
+  triggerStatus String?
+  amountEur     Decimal        @default(0)
+  billingStatus String         @default("DA_FATTURARE")
+  invoiceNumber String?
+  invoiceDate   DateTime?
+  paidAt        DateTime?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  practice      ClientPractice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  @@index([practiceId])
+  @@index([sortOrder])
+  @@index([billingType])
+  @@index([triggerStatus])
+  @@index([billingStatus])
+  @@index([invoiceDate])
+  @@index([paidAt])
 }
 
 model WorkReport {

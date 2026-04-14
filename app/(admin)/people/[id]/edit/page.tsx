@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
-
+import PersonClientSiteFields from "@/components/people/PersonClientSiteFields";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -38,14 +38,56 @@ const MARKETING_LISTS = [
   "ALTRO",
 ] as const;
 
+function normalize(v: string) {
+  return String(v ?? "").trim().toUpperCase();
+}
+
+function normalizeLists(values: string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of values) {
+    const value = normalize(raw);
+    if (!value) continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+
+  return out;
+}
+
+function splitMarketingLists(value: any) {
+  return normalizeLists(
+    String(value ?? "")
+      .split(",")
+      .map((x) => String(x ?? ""))
+  );
+}
+
+function stringifyLists(values: string[]) {
+  const out = normalizeLists(values);
+  return out.length ? out.join(", ") : "ALTRO";
+}
+
+function fmtDate(d: Date | null) {
+  return d ? new Date(d).toISOString().slice(0, 10) : "";
+}
+
 export default async function EditPersonPage({
   params,
   searchParams,
 }: {
   params: { id: string };
-  searchParams?: SP;
+  searchParams?: SP | Promise<SP>;
 }) {
   const { prisma } = await import("@/lib/prisma");
+
+  const resolvedSearchParams =
+    searchParams && typeof (searchParams as Promise<SP>).then === "function"
+      ? await (searchParams as Promise<SP>)
+      : ((searchParams as SP | undefined) ?? {});
+
   const person = await prisma.person.findUnique({
     where: { id: params.id },
     include: {
@@ -65,6 +107,10 @@ export default async function EditPersonPage({
 
   const clients = await prisma.client.findMany({
     orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+    },
   });
 
   const sitesRaw = await prisma.clientSite.findMany({
@@ -79,11 +125,13 @@ export default async function EditPersonPage({
     clientName: s.client?.name ?? "—",
   }));
 
+  const personDisplayName = `${person.lastName} ${person.firstName}`.trim();
+
   const existingContact = person.clientId
     ? await prisma.clientContact.findFirst({
         where: {
           clientId: person.clientId,
-          name: `${person.lastName} ${person.firstName}`.trim(),
+          name: personDisplayName,
         },
         select: {
           id: true,
@@ -93,17 +141,15 @@ export default async function EditPersonPage({
       })
     : null;
 
-  const clientIdFromQs = String(searchParams?.clientId ?? "").trim();
-  const returnTo = String(searchParams?.returnTo ?? "").trim();
+  const clientIdFromQs = String(resolvedSearchParams?.clientId ?? "").trim();
+  const returnTo = String(resolvedSearchParams?.returnTo ?? "").trim();
+  const err = String(resolvedSearchParams?.err ?? "").trim();
 
   const qs = new URLSearchParams();
   if (clientIdFromQs) qs.set("clientId", clientIdFromQs);
   if (returnTo) qs.set("returnTo", returnTo);
   const tail = qs.toString();
   const qsSuffix = tail ? `?${tail}` : "";
-
-  const fmtDate = (d: Date | null) =>
-    d ? new Date(d).toISOString().slice(0, 10) : "";
 
   const linkedClientIds = new Set<string>();
   if (person.clientId) linkedClientIds.add(person.clientId);
@@ -112,10 +158,6 @@ export default async function EditPersonPage({
   const mainClientId = person.clientId ?? "";
   const mainSiteId =
     person.personSites.find((ps) => ps.site?.clientId === person.clientId)?.siteId ?? "";
-
-  const mainClientSites = mainClientId
-    ? sites.filter((s) => s.clientId === mainClientId)
-    : [];
 
   const extraPairs: { clientId: string; siteId: string }[] = [];
   const usedPairKeys = new Set<string>();
@@ -147,6 +189,7 @@ export default async function EditPersonPage({
   async function updatePerson(formData: FormData) {
     "use server";
 
+    const { prisma } = await import("@/lib/prisma");
     const id = params.id;
 
     const lastName = String(formData.get("lastName") ?? "").trim();
@@ -177,8 +220,7 @@ export default async function EditPersonPage({
     const hireDateRaw = String(formData.get("hireDate") ?? "").trim();
     const hireDate = hireDateRaw ? new Date(hireDateRaw) : null;
 
-    const medicalCheckDone =
-      String(formData.get("medicalCheckDone") ?? "").trim() === "on";
+    const medicalCheckDone = String(formData.get("medicalCheckDone") ?? "").trim() === "on";
 
     const clientIdRaw = String(formData.get("clientId") ?? "").trim();
     const clientId = clientIdRaw || null;
@@ -191,8 +233,10 @@ export default async function EditPersonPage({
 
     const createAlsoContact = formData.get("createAlsoContact") === "on";
     const contactRole = String(formData.get("contactRole") ?? "ALTRO").trim() || "ALTRO";
-    const marketingList =
-      String(formData.get("marketingList") ?? "ALTRO").trim() || "ALTRO";
+    const marketingLists = normalizeLists(
+      formData.getAll("marketingLists").map((x) => String(x))
+    );
+    const marketingList = stringifyLists(marketingLists);
 
     if (fiscalCode) {
       const existing = await prisma.person.findFirst({
@@ -203,6 +247,32 @@ export default async function EditPersonPage({
       if (existing) {
         const msg = `Codice Fiscale già presente su: ${existing.lastName} ${existing.firstName}`;
         redirect(buildEditRedirect(msg));
+      }
+    }
+
+    if (clientId) {
+      const clientExists = await prisma.client.findUnique({
+        where: { id: clientId },
+        select: { id: true },
+      });
+
+      if (!clientExists) {
+        redirect(buildEditRedirect("Cliente principale non valido"));
+      }
+    }
+
+    if (mainSiteId) {
+      const siteExists = await prisma.clientSite.findUnique({
+        where: { id: mainSiteId },
+        select: { id: true, clientId: true },
+      });
+
+      if (!siteExists) {
+        redirect(buildEditRedirect("Sede principale non valida"));
+      }
+
+      if (clientId && siteExists.clientId !== clientId) {
+        redirect(buildEditRedirect("La sede principale non appartiene al cliente principale"));
       }
     }
 
@@ -220,7 +290,7 @@ export default async function EditPersonPage({
       if (sid) finalSiteIds.add(sid);
     }
 
-    const personDisplayName = `${lastName} ${firstName}`.trim();
+    const updatedPersonDisplayName = `${lastName} ${firstName}`.trim();
 
     try {
       await prisma.$transaction(async (tx) => {
@@ -240,6 +310,7 @@ export default async function EditPersonPage({
         });
 
         await tx.personClient.deleteMany({ where: { personId: id } });
+
         for (const cid of Array.from(finalClientIds)) {
           await tx.personClient.create({
             data: { personId: id, clientId: cid },
@@ -247,6 +318,7 @@ export default async function EditPersonPage({
         }
 
         await tx.personSite.deleteMany({ where: { personId: id } });
+
         for (const sid of Array.from(finalSiteIds)) {
           await tx.personSite.create({
             data: { personId: id, siteId: sid },
@@ -257,38 +329,33 @@ export default async function EditPersonPage({
           const existingByName = await tx.clientContact.findFirst({
             where: {
               clientId,
-              name: personDisplayName,
+              name: updatedPersonDisplayName,
             },
             select: { id: true },
           });
 
+          const noteText = role
+            ? `Aggiornato automaticamente da Persona • Mansione: ${role}`
+            : "Aggiornato automaticamente da Persona";
+
+          const baseData: any = {
+            clientId,
+            role: contactRole,
+            name: updatedPersonDisplayName,
+            email,
+            phone,
+            notes: noteText,
+            marketingList,
+          };
+
           if (existingByName) {
             await tx.clientContact.update({
               where: { id: existingByName.id },
-              data: {
-                role: contactRole,
-                marketingList,
-                name: personDisplayName,
-                email,
-                phone,
-                notes: role
-                  ? `Aggiornato automaticamente da Persona • Mansione: ${role}`
-                  : "Aggiornato automaticamente da Persona",
-              },
+              data: baseData,
             });
           } else {
             await tx.clientContact.create({
-              data: {
-                clientId,
-                role: contactRole,
-                marketingList,
-                name: personDisplayName,
-                email,
-                phone,
-                notes: role
-                  ? `Creato automaticamente da Persona • Mansione: ${role}`
-                  : "Creato automaticamente da Persona",
-              },
+              data: baseData,
             });
           }
         }
@@ -298,12 +365,16 @@ export default async function EditPersonPage({
       redirect(buildEditRedirect(msg));
     }
 
-    redirect(returnToForm || `/people/${id}${clientIdQsForm ? `?clientId=${encodeURIComponent(clientIdQsForm)}` : ""}`);
+    redirect(
+      returnToForm ||
+        `/people/${id}${clientIdQsForm ? `?clientId=${encodeURIComponent(clientIdQsForm)}` : ""}`
+    );
   }
 
   async function deletePerson(formData: FormData) {
     "use server";
 
+    const { prisma } = await import("@/lib/prisma");
     const id = params.id;
     const returnToForm = String(formData.get("returnTo") ?? "").trim();
     const clientIdQsForm = String(formData.get("clientIdQs") ?? "").trim();
@@ -330,6 +401,7 @@ export default async function EditPersonPage({
 
   const backHref = returnTo || `/people/${person.id}${qsSuffix}`;
   const cancelHref = returnTo || `/people/${person.id}${qsSuffix}`;
+  const selectedMarketingLists = splitMarketingLists(existingContact?.marketingList);
 
   return (
     <div className="card" style={{ maxWidth: 1180, margin: "0 auto" }}>
@@ -358,10 +430,9 @@ export default async function EditPersonPage({
         </div>
       </div>
 
-      {searchParams?.err ? (
+      {err ? (
         <div className="card" style={{ marginTop: 12, border: "1px solid #ff6b6b" }}>
-          <b style={{ color: "#ff6b6b" }}>Errore:</b>{" "}
-          {decodeURIComponent(searchParams.err)}
+          <b style={{ color: "#ff6b6b" }}>Errore:</b> {decodeURIComponent(err)}
         </div>
       ) : null}
 
@@ -425,112 +496,13 @@ export default async function EditPersonPage({
           </div>
         </div>
 
-        <div className="card" style={{ marginTop: 12 }}>
-          <h2>Cliente principale</h2>
-
-          <div className="grid2" style={{ marginTop: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <label>Cliente principale</label>
-              <select
-                className="input"
-                name="clientId"
-                id="mainClientSelect"
-                defaultValue={mainClientId}
-              >
-                <option value="">— nessun cliente —</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ minWidth: 0 }}>
-              <label>Sede principale</label>
-              <select
-                className="input"
-                name="mainSiteId"
-                id="mainSiteSelect"
-                defaultValue={mainSiteId}
-              >
-                <option value="">— nessuna sede —</option>
-                {mainClientSites.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="muted" style={{ marginTop: 6 }}>
-            Prima scegli il cliente principale, poi seleziona una sede di quel cliente.
-          </div>
-        </div>
-
-        <div className="card" style={{ marginTop: 12, overflow: "hidden" }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <h2 style={{ margin: 0 }}>Altri collegamenti cliente / sede</h2>
-            <button className="btn" type="button" id="add-link-row-btn">
-              + Aggiungi riga
-            </button>
-          </div>
-
-          <div className="muted" style={{ marginTop: 6 }}>
-            Per ogni riga scegli un cliente e, se vuoi, una sede di quel cliente.
-          </div>
-
-          <div id="extra-link-rows" style={{ marginTop: 12, display: "grid", gap: 10 }}>
-            {extraPairs.map((row, idx) => (
-              <div
-                key={`${row.clientId}-${row.siteId}-${idx}`}
-                className="extra-link-row"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr) auto",
-                  gap: 10,
-                  alignItems: "end",
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <label>Cliente</label>
-                  <select
-                    className="input extra-client-select"
-                    name="extraClientIds"
-                    data-selected-client={row.clientId}
-                    defaultValue={row.clientId}
-                  >
-                    <option value="">— nessun cliente —</option>
-                    {clients.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ minWidth: 0 }}>
-                  <label>Sede</label>
-                  <select
-                    className="input extra-site-select"
-                    name="extraSiteIds"
-                    data-selected-site={row.siteId}
-                    defaultValue={row.siteId}
-                  >
-                    <option value="">— nessuna sede —</option>
-                  </select>
-                </div>
-
-                <div>
-                  <button className="btn remove-link-row-btn" type="button">
-                    Rimuovi
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <PersonClientSiteFields
+          clients={clients}
+          sites={sites}
+          defaultClientId={mainClientId}
+          defaultMainSiteId={mainSiteId}
+          initialExtraPairs={extraPairs}
+        />
 
         <div className="card" style={{ marginTop: 12 }}>
           <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 700 }}>
@@ -559,18 +531,20 @@ export default async function EditPersonPage({
             </div>
 
             <div>
-              <label>Lista marketing</label>
-              <select
-                className="input"
-                name="marketingList"
-                defaultValue={existingContact?.marketingList ?? "ALTRO"}
-              >
+              <label>Liste marketing</label>
+              <div className="card" style={{ marginTop: 8, padding: 10 }}>
                 {MARKETING_LISTS.map((m) => (
-                  <option key={m} value={m}>
+                  <label key={m} style={{ display: "block" }}>
+                    <input
+                      type="checkbox"
+                      name="marketingLists"
+                      value={m}
+                      defaultChecked={selectedMarketingLists.includes(m)}
+                    />{" "}
                     {m}
-                  </option>
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
 
@@ -589,154 +563,6 @@ export default async function EditPersonPage({
           </Link>
         </div>
       </form>
-
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `
-(function () {
-  const allSites = ${JSON.stringify(sites)};
-  const allClients = ${JSON.stringify(clients.map(c => ({ id: c.id, name: c.name })))};
-
-  function siteOptionsForClient(clientId) {
-    if (!clientId) return [];
-    return allSites.filter(s => s.clientId === clientId);
-  }
-
-  function fillSiteSelect(selectEl, clientId, selectedSiteId) {
-    if (!selectEl) return;
-
-    const current = selectedSiteId || "";
-    const options = siteOptionsForClient(clientId);
-
-    selectEl.innerHTML = "";
-
-    const empty = document.createElement("option");
-    empty.value = "";
-    empty.textContent = "— nessuna sede —";
-    selectEl.appendChild(empty);
-
-    for (const s of options) {
-      const opt = document.createElement("option");
-      opt.value = s.id;
-      opt.textContent = s.name;
-      if (current && current === s.id) opt.selected = true;
-      selectEl.appendChild(opt);
-    }
-
-    if (current && !options.some(s => s.id === current)) {
-      selectEl.value = "";
-    }
-  }
-
-  function wireMain() {
-    const clientSel = document.getElementById("mainClientSelect");
-    const siteSel = document.getElementById("mainSiteSelect");
-    if (!clientSel || !siteSel) return;
-
-    clientSel.addEventListener("change", function () {
-      fillSiteSelect(siteSel, clientSel.value, "");
-    });
-  }
-
-  function wireRow(row) {
-    if (!row) return;
-    const clientSel = row.querySelector(".extra-client-select");
-    const siteSel = row.querySelector(".extra-site-select");
-    const removeBtn = row.querySelector(".remove-link-row-btn");
-
-    if (!clientSel || !siteSel) return;
-
-    const initialClient = clientSel.getAttribute("data-selected-client") || clientSel.value || "";
-    const initialSite = siteSel.getAttribute("data-selected-site") || siteSel.value || "";
-    fillSiteSelect(siteSel, initialClient, initialSite);
-
-    clientSel.addEventListener("change", function () {
-      fillSiteSelect(siteSel, clientSel.value, "");
-    });
-
-    if (removeBtn) {
-      removeBtn.addEventListener("click", function () {
-        const rows = document.querySelectorAll(".extra-link-row");
-        if (rows.length <= 1) {
-          clientSel.value = "";
-          fillSiteSelect(siteSel, "", "");
-          return;
-        }
-        row.remove();
-      });
-    }
-  }
-
-  function createRow() {
-    const wrap = document.createElement("div");
-    wrap.className = "extra-link-row";
-    wrap.style.display = "grid";
-    wrap.style.gridTemplateColumns = "minmax(0,1fr) minmax(0,1fr) auto";
-    wrap.style.gap = "10px";
-    wrap.style.alignItems = "end";
-
-    const clientCol = document.createElement("div");
-    clientCol.style.minWidth = "0";
-    clientCol.innerHTML = '<label>Cliente</label>';
-
-    const clientSel = document.createElement("select");
-    clientSel.className = "input extra-client-select";
-    clientSel.name = "extraClientIds";
-
-    const emptyClient = document.createElement("option");
-    emptyClient.value = "";
-    emptyClient.textContent = "— nessun cliente —";
-    clientSel.appendChild(emptyClient);
-
-    for (const c of allClients) {
-      const opt = document.createElement("option");
-      opt.value = c.id;
-      opt.textContent = c.name;
-      clientSel.appendChild(opt);
-    }
-
-    clientCol.appendChild(clientSel);
-
-    const siteCol = document.createElement("div");
-    siteCol.style.minWidth = "0";
-    siteCol.innerHTML = '<label>Sede</label>';
-
-    const siteSel = document.createElement("select");
-    siteSel.className = "input extra-site-select";
-    siteSel.name = "extraSiteIds";
-    siteCol.appendChild(siteSel);
-
-    const btnCol = document.createElement("div");
-    const removeBtn = document.createElement("button");
-    removeBtn.type = "button";
-    removeBtn.className = "btn remove-link-row-btn";
-    removeBtn.textContent = "Rimuovi";
-    btnCol.appendChild(removeBtn);
-
-    wrap.appendChild(clientCol);
-    wrap.appendChild(siteCol);
-    wrap.appendChild(btnCol);
-
-    const container = document.getElementById("extra-link-rows");
-    if (container) {
-      container.appendChild(wrap);
-      wireRow(wrap);
-    }
-  }
-
-  wireMain();
-  document.querySelectorAll(".extra-link-row").forEach(wireRow);
-
-  const addBtn = document.getElementById("add-link-row-btn");
-  if (addBtn) {
-    addBtn.addEventListener("click", function () {
-      createRow();
-    });
-  }
-})();
-          `,
-        }}
-      />
     </div>
   );
 }

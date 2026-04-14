@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import PrintButton from "./PrintButton";
-import ConfirmSubmitButton from "./ConfirmSubmitButton";
+import { markBilledMonthly, markWorkedMonthly } from "@/app/actions/monthly-work";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,41 +56,31 @@ function getSiteLabel(row: any) {
   return String(row?.site?.name ?? "").trim() || "—";
 }
 
-function addMonths(date: Date, months: number) {
-  const d = new Date(date);
-  const day = d.getDate();
-  d.setMonth(d.getMonth() + months);
-  if (d.getDate() < day) d.setDate(0);
-  return d;
-}
-
-function calcNextDueDate(fromDate: Date, periodicity: string | null | undefined) {
-  const p = String(periodicity ?? "").trim().toUpperCase();
-
-  if (p === "SEMESTRALE") return addMonths(fromDate, 6);
-  if (p === "ANNUALE") return addMonths(fromDate, 12);
-  if (p === "BIENNALE") return addMonths(fromDate, 24);
-  if (p === "TRIENNALE") return addMonths(fromDate, 36);
-  if (p === "QUINQUENNALE") return addMonths(fromDate, 60);
-
-  return addMonths(fromDate, 12);
-}
-
-export default async function MonthlyWorkPage({ searchParams }: { searchParams: SP }) {
+export default async function MonthlyWorkPage({
+  searchParams,
+}: {
+  searchParams?: SP | Promise<SP>;
+}) {
   const { prisma } = await import("@/lib/prisma");
+
+  const resolvedSearchParams =
+    searchParams && typeof (searchParams as Promise<SP>).then === "function"
+      ? await (searchParams as Promise<SP>)
+      : ((searchParams as SP | undefined) ?? {});
+
   const now = new Date();
   const defaultYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const ym = (searchParams.ym ?? defaultYm).trim();
+  const ym = (resolvedSearchParams.ym ?? defaultYm).trim();
 
-  const serviceId = (searchParams.serviceId ?? "TUTTI").trim();
-  const siteId = (searchParams.siteId ?? "TUTTE").trim();
-  const q = (searchParams.q ?? "").trim();
+  const serviceId = (resolvedSearchParams.serviceId ?? "TUTTI").trim();
+  const siteId = (resolvedSearchParams.siteId ?? "TUTTE").trim();
+  const q = (resolvedSearchParams.q ?? "").trim();
 
   const from = firstDayOfMonth(ym);
   const to = firstDayNextMonth(ym);
 
-  const filterFromRaw = (searchParams.from ?? "").trim();
-  const filterToRaw = (searchParams.to ?? "").trim();
+  const filterFromRaw = (resolvedSearchParams.from ?? "").trim();
+  const filterToRaw = (resolvedSearchParams.to ?? "").trim();
 
   const filterFrom = filterFromRaw ? new Date(`${filterFromRaw}T00:00:00`) : null;
   const filterTo = filterToRaw ? new Date(`${filterToRaw}T23:59:59.999`) : null;
@@ -137,12 +125,16 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
   if (siteId !== "TUTTE") where.siteId = siteId;
 
   if (q) {
-    where.OR = [
-      ...(where.OR ?? []),
-      { client: { name: { contains: q } } },
-      { service: { name: { contains: q } } },
-      { referenteName: { contains: q } },
-      { site: { name: { contains: q } } },
+    where.AND = [
+      ...(where.AND ?? []),
+      {
+        OR: [
+          { client: { name: { contains: q } } },
+          { service: { name: { contains: q } } },
+          { referenteName: { contains: q } },
+          { site: { name: { contains: q } } },
+        ],
+      },
     ];
   }
 
@@ -252,7 +244,11 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
   });
 
   const overdueCount = rowsUnique.filter(
-    (r: any) => r.status !== "SVOLTO" && r.status !== "FATTURATO" && r.dueDate && new Date(r.dueDate) < from
+    (r: any) =>
+      r.status !== "SVOLTO" &&
+      r.status !== "FATTURATO" &&
+      r.dueDate &&
+      new Date(r.dueDate) < from
   ).length;
 
   const redirectPath = `/monthly-work?ym=${encodeURIComponent(ym)}&serviceId=${encodeURIComponent(
@@ -260,59 +256,6 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
   )}&siteId=${encodeURIComponent(siteId)}${q ? `&q=${encodeURIComponent(q)}` : ""}${
     filterFromRaw ? `&from=${encodeURIComponent(filterFromRaw)}` : ""
   }${filterToRaw ? `&to=${encodeURIComponent(filterToRaw)}` : ""}`;
-
-  async function markWorkedLocal(formData: FormData) {
-    "use server";
-
-    const { prisma } = await import("@/lib/prisma");
-    const clientServiceId = String(formData.get("clientServiceId") ?? "").trim();
-    const redirectPath = String(formData.get("redirectPath") ?? "/monthly-work").trim() || "/monthly-work";
-
-    if (!clientServiceId) redirect(redirectPath);
-
-    await prisma.clientService.update({
-      where: { id: clientServiceId },
-      data: {
-        status: "IN_CORSO",
-      },
-    });
-
-    redirect(redirectPath);
-  }
-
-  async function markDoneLocal(formData: FormData) {
-    "use server";
-
-    const { prisma } = await import("@/lib/prisma");
-    const clientServiceId = String(formData.get("clientServiceId") ?? "").trim();
-    const redirectPath = String(formData.get("redirectPath") ?? "/monthly-work").trim() || "/monthly-work";
-
-    if (!clientServiceId) redirect(redirectPath);
-
-    const current = await prisma.clientService.findUnique({
-      where: { id: clientServiceId },
-      select: {
-        id: true,
-        periodicity: true,
-      },
-    });
-
-    if (!current) redirect(redirectPath);
-
-    const doneAt = new Date();
-    const nextDueDate = calcNextDueDate(doneAt, current.periodicity);
-
-    await prisma.clientService.update({
-      where: { id: clientServiceId },
-      data: {
-        status: "FATTURATO",
-        lastDoneAt: doneAt,
-        dueDate: nextDueDate,
-      },
-    });
-
-    redirect(redirectPath);
-  }
 
   return (
     <div className="card">
@@ -334,12 +277,6 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
           padding: 2px 8px;
           border: 1px solid rgba(255,255,255,0.25);
           border-radius: 999px;
-        }
-
-        .row-worked {
-          background: rgba(59, 130, 246, 0.10);
-          border-top: 1px solid rgba(59, 130, 246, 0.20);
-          border-bottom: 1px solid rgba(59, 130, 246, 0.20);
         }
 
         .row-done {
@@ -383,7 +320,6 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
         <h1>Lavori mensili</h1>
 
         <div className="row no-print" style={{ gap: 8 }}>
-          <PrintButton />
           <Link className="btn" href="/clients">
             Clienti
           </Link>
@@ -556,17 +492,24 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
         <tbody>
           {rowsUnique.map((r: any) => {
             const due = r.dueDate ? new Date(r.dueDate) : null;
-            const isOverdue = !!due && r.status !== "SVOLTO" && r.status !== "FATTURATO" && due < from;
-            const isLateToday = !!due && r.status !== "SVOLTO" && r.status !== "FATTURATO" && due < today;
+            const isOverdue =
+              !!due &&
+              r.status !== "SVOLTO" &&
+              r.status !== "FATTURATO" &&
+              due < from;
+            const isLateToday =
+              !!due &&
+              r.status !== "SVOLTO" &&
+              r.status !== "FATTURATO" &&
+              due < today;
             const isHigh = r.priority === "ALTA";
-            const isWorked = r.status === "IN_CORSO";
             const isDone = r.status === "SVOLTO";
             const isBilled = r.status === "FATTURATO";
 
             return (
               <tr
                 key={r.id}
-                className={isBilled ? "row-billed" : isDone ? "row-done" : isWorked ? "row-worked" : ""}
+                className={isBilled ? "row-billed" : isDone ? "row-done" : ""}
               >
                 <td className={isLateToday ? "late" : ""}>
                   {fmt(r.dueDate)}
@@ -611,12 +554,6 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
                             color: "#166534",
                             border: "1px solid rgba(34,197,94,0.30)",
                           }
-                        : isWorked
-                        ? {
-                            background: "rgba(37,99,235,0.12)",
-                            color: "#1d4ed8",
-                            border: "1px solid rgba(37,99,235,0.30)",
-                          }
                         : {
                             background: "rgba(239,68,68,0.10)",
                             color: "#b91c1c",
@@ -660,23 +597,11 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
                       GIÀ SVOLTO
                     </span>
                   ) : (
-                    <form action={markWorkedLocal}>
+                    <form action={markWorkedMonthly}>
                       <input type="hidden" name="clientServiceId" value={r.id} />
-                      <input type="hidden" name="ym" value={ym} />
                       <input type="hidden" name="redirectPath" value={redirectPath} />
-                      <button
-                        className="btn"
-                        type="submit"
-                        style={
-                          isWorked
-                            ? {
-                                border: "1px solid rgba(34,197,94,0.8)",
-                                color: "rgba(34,197,94,0.95)",
-                              }
-                            : {}
-                        }
-                      >
-                        {isWorked ? "SVOLTO ✓" : "SVOLTO"}
+                      <button className="btn" type="submit">
+                        SVOLTO
                       </button>
                     </form>
                   )}
@@ -695,19 +620,12 @@ export default async function MonthlyWorkPage({ searchParams }: { searchParams: 
                       GIÀ FATTURATO
                     </span>
                   ) : (
-                    <form action={markDoneLocal}>
+                    <form action={markBilledMonthly}>
                       <input type="hidden" name="clientServiceId" value={r.id} />
-                      <input type="hidden" name="ym" value={ym} />
                       <input type="hidden" name="redirectPath" value={redirectPath} />
-
-                      <ConfirmSubmitButton
-                        className="btn primary"
-                        confirmMessage={`Confermi "FATTURATO" per:\n${r.client.name}\n${
-                          r.site ? `Sede: ${r.site.name}\n` : ""
-                        }${r.service.name}?`}
-                      >
+                      <button className="btn primary" type="submit">
                         FATTURATO
-                      </ConfirmSubmitButton>
+                      </button>
                     </form>
                   )}
                 </td>

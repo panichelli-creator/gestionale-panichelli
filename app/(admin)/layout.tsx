@@ -1,5 +1,6 @@
 "use client";
 
+import LogoutButton from "@/components/LogoutButton";
 import Link from "next/link";
 import GlobalSearch from "@/components/GlobalSearch";
 import { ReactNode, useEffect, useMemo, useState } from "react";
@@ -23,6 +24,7 @@ import {
   Database,
   DoorOpen,
   Map,
+  Receipt,
 } from "lucide-react";
 
 const FONT =
@@ -52,6 +54,7 @@ type NavLinkRow = {
 function fmtDate(iso: string | null) {
   if (!iso) return "";
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
   const dd = String(d.getDate()).padStart(2, "0");
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const yy = d.getFullYear();
@@ -65,7 +68,9 @@ function fmtEur(n: any) {
 
 function readCookie(name: string) {
   if (typeof document === "undefined") return null;
-  const parts = document.cookie.split("; ").find((row) => row.startsWith(`${name}=`));
+  const parts = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${name}=`));
   return parts ? decodeURIComponent(parts.split("=")[1]) : null;
 }
 
@@ -147,7 +152,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         role={role}
       />
 
-      <main style={{ flex: 1, width: "100%", padding: 24, maxWidth: "none", margin: 0 }}>
+      <main
+        style={{
+          flex: 1,
+          width: "100%",
+          padding: 24,
+          maxWidth: "none",
+          margin: 0,
+        }}
+      >
         {children}
       </main>
     </div>
@@ -175,12 +188,38 @@ function Sidebar({
 
   useEffect(() => {
     if (!notiOpen || role === "ingegnere_clinico") return;
+
+    let cancelled = false;
     setNotiLoading(true);
+
     fetch("/api/notifications", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data) => setNoti(data))
-      .catch(() => setNoti({ due7: [], due30: [], error: "Errore rete" }))
-      .finally(() => setNotiLoading(false));
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error("Errore caricamento notifiche");
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setNoti({
+            due7: Array.isArray(data?.due7) ? data.due7 : [],
+            due30: Array.isArray(data?.due30) ? data.due30 : [],
+            error: data?.error,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setNoti({ due7: [], due30: [], error: "Errore rete" });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setNotiLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [notiOpen, role]);
 
   const links = useMemo<NavLinkRow[]>(
@@ -252,6 +291,12 @@ function Sidebar({
         roles: ["admin", "staff"],
       },
       {
+        href: "/pratiche-fatturazione",
+        label: "Pratiche fatturazione",
+        icon: Receipt,
+        roles: ["admin", "staff"],
+      },
+      {
         href: "/map",
         label: "MAP",
         icon: Map,
@@ -314,6 +359,7 @@ function Sidebar({
           )}
 
           <button
+            type="button"
             onClick={() => setCollapsed(!collapsed)}
             style={iconBtnStyle()}
             title={collapsed ? "Apri" : "Chiudi"}
@@ -338,7 +384,12 @@ function Sidebar({
           }}
         >
           {role !== "ingegnere_clinico" ? (
-            <button style={iconBtnStyle()} title="Notifiche" onClick={() => setNotiOpen(true)}>
+            <button
+              type="button"
+              style={iconBtnStyle()}
+              title="Notifiche"
+              onClick={() => setNotiOpen(true)}
+            >
               <Bell size={18} />
             </button>
           ) : (
@@ -346,13 +397,23 @@ function Sidebar({
           )}
 
           {!collapsed && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: 0.95 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                opacity: 0.95,
+              }}
+            >
               <UserCircle2 size={22} />
-              <span style={{ fontWeight: 700, fontSize: 13 }}>{roleLabel(role)}</span>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>
+                {roleLabel(role)}
+              </span>
             </div>
           )}
 
           <button
+            type="button"
             onClick={() => setDark(!dark)}
             style={iconBtnStyle()}
             title={dark ? "Light mode" : "Dark mode"}
@@ -361,11 +422,18 @@ function Sidebar({
           </button>
         </div>
 
-        <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "10px 0 12px" }} />
+        <div
+          style={{
+            height: 1,
+            background: "rgba(255,255,255,0.08)",
+            margin: "10px 0 12px",
+          }}
+        />
 
         <nav style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {visibleLinks.map((link) => {
-            const active = pathname === link.href || pathname.startsWith(link.href + "/");
+            const active =
+              pathname === link.href || pathname.startsWith(link.href + "/");
             const Icon = link.icon;
 
             return (
@@ -385,7 +453,13 @@ function Sidebar({
                   fontWeight: active ? 800 : 600,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: collapsed ? 0 : 10 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: collapsed ? 0 : 10,
+                  }}
+                >
                   <Icon size={18} />
                   {!collapsed && link.label}
                 </div>
@@ -395,8 +469,19 @@ function Sidebar({
         </nav>
 
         {!collapsed && (
-          <div style={{ marginTop: "auto", fontSize: 12, opacity: 0.55 }}>
-            © {new Date().getFullYear()} Panichelli HSC
+          <div
+            style={{
+              marginTop: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <LogoutButton />
+
+            <div style={{ fontSize: 12, opacity: 0.55 }}>
+              © {new Date().getFullYear()} Panichelli HSC
+            </div>
           </div>
         )}
       </aside>
@@ -421,7 +506,9 @@ function Sidebar({
               height: "100%",
               background: dark ? "#0B1220" : "white",
               color: dark ? "#E5E7EB" : "#0B1220",
-              borderLeft: dark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.10)",
+              borderLeft: dark
+                ? "1px solid rgba(255,255,255,0.10)"
+                : "1px solid rgba(0,0,0,0.10)",
               padding: 16,
               display: "flex",
               flexDirection: "column",
@@ -429,14 +516,25 @@ function Sidebar({
               fontFamily: FONT,
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
               <div>
                 <div style={{ fontWeight: 900, fontSize: 16 }}>Notifiche</div>
                 <div className="muted" style={{ marginTop: 4 }}>
                   Scadenze prossime
                 </div>
               </div>
-              <button style={iconBtnStyle()} onClick={() => setNotiOpen(false)} title="Chiudi">
+              <button
+                type="button"
+                style={iconBtnStyle()}
+                onClick={() => setNotiOpen(false)}
+                title="Chiudi"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -448,15 +546,27 @@ function Sidebar({
               <Link className="btn" href="/aperture">
                 Vai ad Aperture
               </Link>
+              <Link className="btn" href="/pratiche-fatturazione">
+                Vai a Fatturazione pratiche
+              </Link>
             </div>
 
             {notiLoading && <div className="muted">Caricamento…</div>}
             {!notiLoading && noti.error && (
-              <div style={{ color: "#DC2626", fontWeight: 800 }}>{noti.error}</div>
+              <div style={{ color: "#DC2626", fontWeight: 800 }}>
+                {noti.error}
+              </div>
             )}
 
             {!notiLoading && !noti.error && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12, overflow: "auto" }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  overflow: "auto",
+                }}
+              >
                 <Section title="Entro 7 giorni" rows={noti.due7} dark={dark} />
                 <Section title="Entro 30 giorni" rows={noti.due30} dark={dark} />
               </div>
@@ -468,11 +578,21 @@ function Sidebar({
   );
 }
 
-function Section({ title, rows, dark }: { title: string; rows: NotiRow[]; dark: boolean }) {
+function Section({
+  title,
+  rows,
+  dark,
+}: {
+  title: string;
+  rows: NotiRow[];
+  dark: boolean;
+}) {
   return (
     <div
       style={{
-        border: dark ? "1px solid rgba(255,255,255,0.10)" : "1px solid rgba(0,0,0,0.10)",
+        border: dark
+          ? "1px solid rgba(255,255,255,0.10)"
+          : "1px solid rgba(0,0,0,0.10)",
         borderRadius: 16,
         padding: 12,
         background: dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)",
@@ -491,11 +611,21 @@ function Section({ title, rows, dark }: { title: string; rows: NotiRow[]; dark: 
             style={{
               padding: 10,
               borderRadius: 14,
-              background: dark ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.85)",
-              border: dark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.08)",
+              background: dark
+                ? "rgba(255,255,255,0.05)"
+                : "rgba(255,255,255,0.85)",
+              border: dark
+                ? "1px solid rgba(255,255,255,0.08)"
+                : "1px solid rgba(0,0,0,0.08)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
               <div style={{ fontWeight: 900 }}>{r.clientName}</div>
               <div className="muted" style={{ whiteSpace: "nowrap" }}>
                 {fmtDate(r.dueDate)}
@@ -506,7 +636,9 @@ function Section({ title, rows, dark }: { title: string; rows: NotiRow[]; dark: 
               {r.serviceName || "—"} • {fmtEur(r.priceEur)}
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <div
+              style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}
+            >
               {r.urlClient && (
                 <Link className="btn" href={r.urlClient}>
                   Apri cliente

@@ -2,12 +2,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { prisma } from "@/lib/prisma";
+import { spawnSync } from "node:child_process";
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/session";
 
 const ROOT = process.cwd();
-const DB_PATH = path.join(ROOT, "prisma", "dev.db");
 const BACKUP_DIR = path.join(ROOT, "backups");
 const KEEP_DAYS = 7;
 
@@ -29,6 +28,10 @@ function stamp(d = new Date()) {
   )}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+function dayStamp(d = new Date()) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -48,14 +51,6 @@ function safeUnlink(p: string) {
   } catch {}
 }
 
-function copyIfExists(src: string, dst: string) {
-  if (exists(src)) {
-    fs.copyFileSync(src, dst);
-    return true;
-  }
-  return false;
-}
-
 function cleanupOld() {
   if (!exists(BACKUP_DIR)) return;
 
@@ -63,7 +58,7 @@ function cleanupOld() {
 
   const files = fs
     .readdirSync(BACKUP_DIR)
-    .filter((f) => f.startsWith("dev_"))
+    .filter((f) => f.endsWith(".sql") && f.startsWith("backup_"))
     .map((f) => {
       const p = path.join(BACKUP_DIR, f);
       return { f, p, t: fs.statSync(p).mtimeMs };
@@ -74,13 +69,93 @@ function cleanupOld() {
   }
 }
 
+function pickDbUrl() {
+  const directUrl = String(process.env.DIRECT_URL ?? "").trim();
+  const databaseUrl = String(process.env.DATABASE_URL ?? "").trim();
+  const url = directUrl || databaseUrl;
+
+  if (!url) {
+    throw new Error("DIRECT_URL / DATABASE_URL non configurato.");
+  }
+
+  return url;
+}
+
+function pgDumpExecutable() {
+  return process.platform === "win32" ? "pg_dump.exe" : "pg_dump";
+}
+
+function runPgDump(outputFile: string) {
+  const dbUrl = pickDbUrl();
+
+  const result = spawnSync(
+    pgDumpExecutable(),
+    [
+      "--dbname",
+      dbUrl,
+      "--file",
+      outputFile,
+      "--format",
+      "plain",
+      "--no-owner",
+      "--no-privileges",
+      "--clean",
+      "--if-exists",
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PGPASSWORD: "",
+      },
+    }
+  );
+
+  if (result.error) {
+    throw new Error(
+      `pg_dump non disponibile. Installa i client PostgreSQL oppure aggiungi pg_dump al PATH.`
+    );
+  }
+
+  if (result.status !== 0) {
+    throw new Error(
+      String(result.stderr || result.stdout || "Errore backup PostgreSQL").trim()
+    );
+  }
+}
+
+function todayAutomaticBackupName() {
+  return `backup_auto_${dayStamp()}.sql`;
+}
+
+function hasAutomaticBackupForToday() {
+  ensureDir(BACKUP_DIR);
+  return exists(path.join(BACKUP_DIR, todayAutomaticBackupName()));
+}
+
+function createAutomaticBackupIfMissing() {
+  ensureDir(BACKUP_DIR);
+
+  if (hasAutomaticBackupForToday()) return null;
+
+  const filename = todayAutomaticBackupName();
+  const fullPath = path.join(BACKUP_DIR, filename);
+
+  runPgDump(fullPath);
+  cleanupOld();
+
+  return filename;
+}
+
 export async function listBackups() {
   requireAdmin();
   ensureDir(BACKUP_DIR);
 
+  createAutomaticBackupIfMissing();
+
   const files = fs
     .readdirSync(BACKUP_DIR)
-    .filter((f) => f.endsWith(".db") && f.startsWith("dev_"))
+    .filter((f) => f.endsWith(".sql") && f.startsWith("backup_"))
     .map((f) => {
       const p = path.join(BACKUP_DIR, f);
       const st = fs.statSync(p);
@@ -101,67 +176,34 @@ export async function backupNow() {
   requireAdmin();
   ensureDir(BACKUP_DIR);
 
-  if (!exists(DB_PATH)) {
-    throw new Error(`DB non trovato: ${DB_PATH}`);
-  }
+  const filename = `backup_manual_${stamp()}.sql`;
+  const fullPath = path.join(BACKUP_DIR, filename);
 
-  const tag = stamp();
-  const baseName = `dev_${tag}`;
-  const destDb = path.join(BACKUP_DIR, `${baseName}.db`);
-
-  // prova a chiudere connessioni prisma
-  try {
-    await prisma.$disconnect();
-  } catch {}
-
-  fs.copyFileSync(DB_PATH, destDb);
-
-  // WAL/SHM (se presenti)
-  copyIfExists(`${DB_PATH}-wal`, path.join(BACKUP_DIR, `${baseName}.db-wal`));
-  copyIfExists(`${DB_PATH}-shm`, path.join(BACKUP_DIR, `${baseName}.db-shm`));
-
+  runPgDump(fullPath);
   cleanupOld();
 
   revalidatePath("/backup");
-  return { ok: true, filename: `${baseName}.db` };
+
+  return { ok: true, filename };
 }
 
 export async function restoreBackup(formData: FormData) {
   requireAdmin();
   ensureDir(BACKUP_DIR);
 
-  const filename = String(formData.get("filename") ?? "");
+  const filename = String(formData.get("filename") ?? "").trim();
 
   if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
     throw new Error("Nome file non valido.");
   }
 
-  const srcDb = path.join(BACKUP_DIR, filename);
-  if (!exists(srcDb)) {
+  const src = path.join(BACKUP_DIR, filename);
+
+  if (!exists(src)) {
     throw new Error("Backup non trovato.");
   }
 
-  try {
-    await prisma.$disconnect();
-  } catch {}
-
-  safeUnlink(`${DB_PATH}-wal`);
-  safeUnlink(`${DB_PATH}-shm`);
-
-  fs.copyFileSync(srcDb, DB_PATH);
-
-  const wal = srcDb.replace(/\.db$/, ".db-wal");
-  const shm = srcDb.replace(/\.db$/, ".db-shm");
-  if (exists(wal)) fs.copyFileSync(wal, `${DB_PATH}-wal`);
-  if (exists(shm)) fs.copyFileSync(shm, `${DB_PATH}-shm`);
-
-  revalidatePath("/backup");
-  revalidatePath("/dashboard");
-  revalidatePath("/clients");
-  revalidatePath("/people");
-  revalidatePath("/training");
-  revalidatePath("/maintenance");
-  revalidatePath("/import-export");
-
-  return { ok: true, restored: filename };
+  throw new Error(
+    "Ripristino automatico PostgreSQL non abilitato da interfaccia. Usa il file .sql scaricato per il restore manuale."
+  );
 }

@@ -1,6 +1,5 @@
 "use server";
 
-import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
@@ -16,6 +15,8 @@ function norm(s: string) {
 }
 
 export async function createOrUpdateUser(formData: FormData) {
+  const { prisma } = await import("@/lib/prisma");
+
   requireAdmin();
 
   const username = norm(String(formData.get("username") ?? "")).toLowerCase();
@@ -26,7 +27,6 @@ export async function createOrUpdateUser(formData: FormData) {
   if (!username) throw new Error("Username obbligatorio.");
   if (!password || password.length < 6) throw new Error("Password troppo corta (min 6).");
 
-  // 🔥 NUOVA LOGICA RUOLI
   let role: "admin" | "staff" | "ingegnere_clinico" = "staff";
 
   if (roleRaw === "admin") role = "admin";
@@ -52,6 +52,8 @@ export async function createOrUpdateUser(formData: FormData) {
 }
 
 export async function deleteUser(formData: FormData) {
+  const { prisma } = await import("@/lib/prisma");
+
   requireAdmin();
 
   const id = String(formData.get("id") ?? "");
@@ -75,6 +77,8 @@ export async function deleteUser(formData: FormData) {
 }
 
 export async function listUsers() {
+  const { prisma } = await import("@/lib/prisma");
+
   requireAdmin();
 
   const users = await prisma.user.findMany({

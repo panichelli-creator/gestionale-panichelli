@@ -14,16 +14,6 @@ const ROLES = [
   "ALTRO",
 ];
 
-const MARKETING_LISTS = [
-  "MEDICI",
-  "ASO",
-  "TITOLARI",
-  "AMMINISTRAZIONE",
-  "IGIENISTI",
-  "FISIOTERAPISTI",
-  "ALTRO",
-];
-
 type SP = {
   err?: string;
   ok?: string;
@@ -31,40 +21,143 @@ type SP = {
   returnTo?: string;
 };
 
+function normalize(v: string) {
+  return String(v ?? "").trim().toUpperCase();
+}
+
+function parseLists(...values: any[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of values) {
+    if (value == null) continue;
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const v = normalize(String(item ?? ""));
+        if (!v || seen.has(v)) continue;
+        seen.add(v);
+        out.push(v);
+      }
+      continue;
+    }
+
+    const raw = String(value ?? "").trim();
+    if (!raw) continue;
+
+    if (
+      (raw.startsWith("[") && raw.endsWith("]")) ||
+      (raw.startsWith('["') && raw.endsWith('"]'))
+    ) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            const v = normalize(String(item ?? ""));
+            if (!v || seen.has(v)) continue;
+            seen.add(v);
+            out.push(v);
+          }
+          continue;
+        }
+      } catch {}
+    }
+
+    for (const part of raw.split(",")) {
+      const v = normalize(part);
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
+  }
+
+  return out;
+}
+
+function stringifyLists(values: string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of values) {
+    const value = normalize(raw);
+    if (!value) continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+
+  return out.length ? out.join(", ") : "ALTRO";
+}
+
 export default async function ClientContactsPage({
   params,
   searchParams,
 }: {
   params: { id: string };
-  searchParams?: SP;
+  searchParams?: SP | Promise<SP>;
 }) {
   const { prisma } = await import("@/lib/prisma");
 
+  const resolvedSearchParams =
+    searchParams && typeof (searchParams as Promise<SP>).then === "function"
+      ? await (searchParams as Promise<SP>)
+      : ((searchParams as SP | undefined) ?? {});
+
   const client = await prisma.client.findUnique({
     where: { id: params.id },
-    include: { contacts: { orderBy: { name: "asc" } } },
+    include: {
+      contacts: {
+        orderBy: { name: "asc" },
+      },
+    },
   });
 
   if (!client) return notFound();
 
-  const clientId = client.id;
-  const returnTo = String(searchParams?.returnTo ?? "").trim();
-  const editId = String(searchParams?.edit ?? "").trim() || null;
-  const contactInEdit =
-    editId ? client.contacts.find((c) => c.id === editId) ?? null : null;
+  const marketingListsDb = await prisma.marketingList.findMany({
+    where: { isActive: true },
+    orderBy: [{ isSystem: "desc" }, { name: "asc" }],
+  });
 
-  function buildPageUrl(extra?: Record<string, string | null | undefined>) {
-    const p = new URLSearchParams();
-    if (returnTo) p.set("returnTo", returnTo);
+  const returnTo = String(resolvedSearchParams?.returnTo ?? "").trim();
+  const editId = String(resolvedSearchParams?.edit ?? "").trim();
+  const contactEdit =
+    editId ? client.contacts.find((c: any) => c.id === editId) ?? null : null;
+
+  const allLists: string[] = [];
+  const seenLists = new Set<string>();
+
+  for (const row of marketingListsDb as any[]) {
+    const value = normalize(row?.name);
+    if (!value) continue;
+    if (seenLists.has(value)) continue;
+    seenLists.add(value);
+    allLists.push(value);
+  }
+
+  for (const contact of client.contacts as any[]) {
+    for (const item of parseLists(contact.marketingList, (contact as any).marketingLists)) {
+      if (seenLists.has(item)) continue;
+      seenLists.add(item);
+      allLists.push(item);
+    }
+  }
+
+  allLists.sort((a, b) => a.localeCompare(b, "it"));
+
+  function buildUrl(extra?: Record<string, string | null | undefined>) {
+    const qs = new URLSearchParams();
+
+    if (returnTo) qs.set("returnTo", returnTo);
 
     for (const [k, v] of Object.entries(extra ?? {})) {
       if (v != null && String(v).trim() !== "") {
-        p.set(k, String(v));
+        qs.set(k, String(v));
       }
     }
 
-    const qs = p.toString();
-    return qs ? `/clients/${clientId}/contacts?${qs}` : `/clients/${clientId}/contacts`;
+    const s = qs.toString();
+    return s ? `/clients/${params.id}/contacts?${s}` : `/clients/${params.id}/contacts`;
   }
 
   async function createContact(formData: FormData) {
@@ -72,43 +165,66 @@ export default async function ClientContactsPage({
 
     const { prisma } = await import("@/lib/prisma");
 
-    const clientId = params.id;
     const returnToForm = String(formData.get("returnTo") ?? "").trim();
-    const role = String(formData.get("role") ?? "ALTRO").trim() || "ALTRO";
-    const marketingList =
-      String(formData.get("marketingList") ?? "ALTRO").trim() || "ALTRO";
     const name = String(formData.get("name") ?? "").trim();
+    const role = String(formData.get("role") ?? "ALTRO").trim() || "ALTRO";
     const email = String(formData.get("email") ?? "").trim() || null;
     const phone = String(formData.get("phone") ?? "").trim() || null;
     const notes = String(formData.get("notes") ?? "").trim() || null;
+    const lists = formData.getAll("marketingLists").map((x) => normalize(String(x)));
 
-    const buildUrl = (extra?: Record<string, string | null | undefined>) => {
-      const p = new URLSearchParams();
-      if (returnToForm) p.set("returnTo", returnToForm);
-
-      for (const [k, v] of Object.entries(extra ?? {})) {
-        if (v != null && String(v).trim() !== "") {
-          p.set(k, String(v));
-        }
-      }
-
-      const qs = p.toString();
-      return qs ? `/clients/${clientId}/contacts?${qs}` : `/clients/${clientId}/contacts`;
-    };
+    const qs = new URLSearchParams();
+    if (returnToForm) qs.set("returnTo", returnToForm);
+    const base = qs.toString() ? `/clients/${params.id}/contacts?${qs.toString()}` : `/clients/${params.id}/contacts`;
 
     if (!name) {
-      redirect(buildUrl({ err: "Nome contatto obbligatorio" }));
+      return redirect(`${base}${base.includes("?") ? "&" : "?"}err=Nome obbligatorio`);
     }
+
+    const listsString = stringifyLists(lists);
 
     try {
       await prisma.clientContact.create({
-        data: { clientId, role, marketingList, name, email, phone, notes },
+        data: {
+          clientId: params.id,
+          name,
+          role,
+          email,
+          phone,
+          notes,
+          marketingList: listsString,
+          marketingLists: JSON.stringify(parseLists(listsString)),
+        } as any,
       });
-    } catch (e: any) {
-      redirect(buildUrl({ err: e?.message ?? "Errore creazione contatto" }));
+    } catch {
+      try {
+        await prisma.clientContact.create({
+          data: {
+            clientId: params.id,
+            name,
+            role,
+            email,
+            phone,
+            notes,
+            marketingList: listsString,
+          } as any,
+        });
+      } catch {
+        await prisma.clientContact.create({
+          data: {
+            clientId: params.id,
+            name,
+            role,
+            email,
+            phone,
+            notes,
+            marketingLists: JSON.stringify(parseLists(listsString)),
+          } as any,
+        });
+      }
     }
 
-    redirect(buildUrl({ ok: "Contatto creato" }));
+    return redirect(`${base}${base.includes("?") ? "&" : "?"}ok=Creato`);
   }
 
   async function updateContact(formData: FormData) {
@@ -116,54 +232,67 @@ export default async function ClientContactsPage({
 
     const { prisma } = await import("@/lib/prisma");
 
-    const clientId = params.id;
     const returnToForm = String(formData.get("returnTo") ?? "").trim();
-    const contactId = String(formData.get("contactId") ?? "").trim();
-    const role = String(formData.get("role") ?? "ALTRO").trim() || "ALTRO";
-    const marketingList =
-      String(formData.get("marketingList") ?? "ALTRO").trim() || "ALTRO";
+    const id = String(formData.get("id") ?? "").trim();
     const name = String(formData.get("name") ?? "").trim();
+    const role = String(formData.get("role") ?? "ALTRO").trim() || "ALTRO";
     const email = String(formData.get("email") ?? "").trim() || null;
     const phone = String(formData.get("phone") ?? "").trim() || null;
     const notes = String(formData.get("notes") ?? "").trim() || null;
+    const lists = formData.getAll("marketingLists").map((x) => normalize(String(x)));
 
-    const buildUrl = (extra?: Record<string, string | null | undefined>) => {
-      const p = new URLSearchParams();
-      if (returnToForm) p.set("returnTo", returnToForm);
+    const qs = new URLSearchParams();
+    if (returnToForm) qs.set("returnTo", returnToForm);
+    const base = qs.toString() ? `/clients/${params.id}/contacts?${qs.toString()}` : `/clients/${params.id}/contacts`;
 
-      for (const [k, v] of Object.entries(extra ?? {})) {
-        if (v != null && String(v).trim() !== "") {
-          p.set(k, String(v));
-        }
-      }
-
-      const qs = p.toString();
-      return qs ? `/clients/${clientId}/contacts?${qs}` : `/clients/${clientId}/contacts`;
-    };
-
-    if (!contactId) {
-      redirect(buildUrl({ err: "Contatto non valido" }));
+    if (!id || !name) {
+      return redirect(`${base}${base.includes("?") ? "&" : "?"}err=Errore`);
     }
 
-    if (!name) {
-      redirect(buildUrl({ edit: contactId, err: "Nome contatto obbligatorio" }));
-    }
+    const listsString = stringifyLists(lists);
 
     try {
       await prisma.clientContact.update({
-        where: { id: contactId },
-        data: { role, marketingList, name, email, phone, notes },
+        where: { id },
+        data: {
+          name,
+          role,
+          email,
+          phone,
+          notes,
+          marketingList: listsString,
+          marketingLists: JSON.stringify(parseLists(listsString)),
+        } as any,
       });
-    } catch (e: any) {
-      redirect(
-        buildUrl({
-          edit: contactId,
-          err: e?.message ?? "Errore modifica contatto",
-        })
-      );
+    } catch {
+      try {
+        await prisma.clientContact.update({
+          where: { id },
+          data: {
+            name,
+            role,
+            email,
+            phone,
+            notes,
+            marketingList: listsString,
+          } as any,
+        });
+      } catch {
+        await prisma.clientContact.update({
+          where: { id },
+          data: {
+            name,
+            role,
+            email,
+            phone,
+            notes,
+            marketingLists: JSON.stringify(parseLists(listsString)),
+          } as any,
+        });
+      }
     }
 
-    redirect(buildUrl({ ok: "Contatto aggiornato" }));
+    return redirect(`${base}${base.includes("?") ? "&" : "?"}ok=Aggiornato`);
   }
 
   async function deleteContact(formData: FormData) {
@@ -171,46 +300,37 @@ export default async function ClientContactsPage({
 
     const { prisma } = await import("@/lib/prisma");
 
-    const clientId = params.id;
     const returnToForm = String(formData.get("returnTo") ?? "").trim();
-    const contactId = String(formData.get("contactId") ?? "").trim();
+    const id = String(formData.get("id") ?? "").trim();
 
-    const buildUrl = (extra?: Record<string, string | null | undefined>) => {
-      const p = new URLSearchParams();
-      if (returnToForm) p.set("returnTo", returnToForm);
+    const qs = new URLSearchParams();
+    if (returnToForm) qs.set("returnTo", returnToForm);
+    const base = qs.toString() ? `/clients/${params.id}/contacts?${qs.toString()}` : `/clients/${params.id}/contacts`;
 
-      for (const [k, v] of Object.entries(extra ?? {})) {
-        if (v != null && String(v).trim() !== "") {
-          p.set(k, String(v));
-        }
-      }
-
-      const qs = p.toString();
-      return qs ? `/clients/${clientId}/contacts?${qs}` : `/clients/${clientId}/contacts`;
-    };
-
-    if (!contactId) redirect(buildUrl());
-
-    try {
-      await prisma.clientContact.delete({ where: { id: contactId } });
-    } catch (e: any) {
-      redirect(buildUrl({ err: e?.message ?? "Errore eliminazione contatto" }));
+    if (!id) {
+      return redirect(`${base}${base.includes("?") ? "&" : "?"}err=Contatto non valido`);
     }
 
-    redirect(buildUrl({ ok: "Contatto eliminato" }));
+    await prisma.clientContact.delete({
+      where: { id },
+    });
+
+    return redirect(`${base}${base.includes("?") ? "&" : "?"}ok=Eliminato`);
   }
 
-  const backHref = returnTo || `/clients/${clientId}`;
-  const cancelEditHref = buildPageUrl();
-  const editBaseHref = (contactId: string) => buildPageUrl({ edit: contactId });
+  const editLists = contactEdit
+    ? parseLists(contactEdit.marketingList, (contactEdit as any).marketingLists)
+    : [];
+  const backHref = returnTo || `/clients/${params.id}`;
 
   return (
     <div className="card">
       <div
         className="row"
-        style={{ justifyContent: "space-between", alignItems: "center" }}
+        style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}
       >
-        <h1>Contatti — {client.name}</h1>
+        <h1 style={{ margin: 0 }}>Contatti — {client.name}</h1>
+
         <div className="row" style={{ gap: 8 }}>
           <Link className="btn" href={backHref}>
             ← Torna al cliente
@@ -221,17 +341,17 @@ export default async function ClientContactsPage({
         </div>
       </div>
 
-      {searchParams?.err ? (
+      {resolvedSearchParams?.err ? (
         <div
           className="card"
           style={{ marginTop: 12, border: "1px solid #ff6b6b" }}
         >
           <b style={{ color: "#ff6b6b" }}>Errore:</b>{" "}
-          {decodeURIComponent(searchParams.err)}
+          {decodeURIComponent(String(resolvedSearchParams.err))}
         </div>
       ) : null}
 
-      {searchParams?.ok ? (
+      {resolvedSearchParams?.ok ? (
         <div
           className="card"
           style={{
@@ -240,7 +360,7 @@ export default async function ClientContactsPage({
           }}
         >
           <b style={{ color: "rgba(34,197,94,0.95)" }}>OK:</b>{" "}
-          {decodeURIComponent(searchParams.ok)}
+          {decodeURIComponent(String(resolvedSearchParams.ok))}
         </div>
       ) : null}
 
@@ -263,72 +383,52 @@ export default async function ClientContactsPage({
             </div>
 
             <div>
-              <label>Lista marketing</label>
-              <select
-                className="input"
-                name="marketingList"
-                defaultValue="ALTRO"
-              >
-                {MARKETING_LISTS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
+              <label>Liste</label>
+              <div className="card" style={{ marginTop: 8, padding: 10 }}>
+                {allLists.map((m) => (
+                  <label key={`create-${m}`} style={{ display: "block" }}>
+                    <input type="checkbox" name="marketingLists" value={m} /> {m}
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
 
           <div className="grid2" style={{ marginTop: 12 }}>
-            <div>
-              <label>Nome *</label>
-              <input
-                className="input"
-                name="name"
-                placeholder="es: Mario Rossi"
-                required
-              />
-            </div>
-
-            <div>
-              <label>Email</label>
-              <input className="input" name="email" placeholder="nome@mail.it" />
-            </div>
+            <input
+              name="name"
+              className="input"
+              placeholder="Nome *"
+              required
+            />
+            <input name="email" className="input" placeholder="Email" />
           </div>
 
           <div className="grid2" style={{ marginTop: 12 }}>
-            <div>
-              <label>Telefono</label>
-              <input className="input" name="phone" placeholder="333..." />
-            </div>
-
-            <div>
-              <label>Note</label>
-              <input className="input" name="notes" />
-            </div>
+            <input name="phone" className="input" placeholder="Telefono" />
+            <input name="notes" className="input" placeholder="Note" />
           </div>
 
-          <div className="row" style={{ marginTop: 14 }}>
-            <button className="btn primary" type="submit">
-              Salva contatto
-            </button>
-          </div>
+          <button className="btn primary" style={{ marginTop: 10 }} type="submit">
+            Salva
+          </button>
         </form>
       </div>
 
-      {contactInEdit ? (
+      {contactEdit ? (
         <div className="card" style={{ marginTop: 12 }}>
           <div
             className="row"
             style={{ justifyContent: "space-between", alignItems: "center" }}
           >
             <h2>Modifica contatto</h2>
-            <Link className="btn" href={cancelEditHref}>
+            <Link className="btn" href={buildUrl()}>
               Annulla
             </Link>
           </div>
 
           <form action={updateContact} className="card" style={{ marginTop: 10 }}>
-            <input type="hidden" name="contactId" value={contactInEdit.id} />
+            <input type="hidden" name="id" value={contactEdit.id} />
             <input type="hidden" name="returnTo" value={returnTo} />
 
             <div className="grid2">
@@ -337,7 +437,7 @@ export default async function ClientContactsPage({
                 <select
                   className="input"
                   name="role"
-                  defaultValue={contactInEdit.role ?? "ALTRO"}
+                  defaultValue={contactEdit.role ?? "ALTRO"}
                 >
                   {ROLES.map((r) => (
                     <option key={r} value={r}>
@@ -348,73 +448,57 @@ export default async function ClientContactsPage({
               </div>
 
               <div>
-                <label>Lista marketing</label>
-                <select
-                  className="input"
-                  name="marketingList"
-                  defaultValue={(contactInEdit as any).marketingList ?? "ALTRO"}
-                >
-                  {MARKETING_LISTS.map((m) => (
-                    <option key={m} value={m}>
+                <label>Liste</label>
+                <div className="card" style={{ marginTop: 8, padding: 10 }}>
+                  {allLists.map((m) => (
+                    <label key={`edit-${m}`} style={{ display: "block" }}>
+                      <input
+                        type="checkbox"
+                        name="marketingLists"
+                        value={m}
+                        defaultChecked={editLists.includes(m)}
+                      />{" "}
                       {m}
-                    </option>
+                    </label>
                   ))}
-                </select>
+                </div>
               </div>
             </div>
 
             <div className="grid2" style={{ marginTop: 12 }}>
-              <div>
-                <label>Nome *</label>
-                <input
-                  className="input"
-                  name="name"
-                  defaultValue={contactInEdit.name}
-                  placeholder="es: Mario Rossi"
-                  required
-                />
-              </div>
-
-              <div>
-                <label>Email</label>
-                <input
-                  className="input"
-                  name="email"
-                  defaultValue={contactInEdit.email ?? ""}
-                  placeholder="nome@mail.it"
-                />
-              </div>
+              <input
+                name="name"
+                defaultValue={contactEdit.name ?? ""}
+                className="input"
+                placeholder="Nome *"
+                required
+              />
+              <input
+                name="email"
+                defaultValue={contactEdit.email ?? ""}
+                className="input"
+                placeholder="Email"
+              />
             </div>
 
             <div className="grid2" style={{ marginTop: 12 }}>
-              <div>
-                <label>Telefono</label>
-                <input
-                  className="input"
-                  name="phone"
-                  defaultValue={contactInEdit.phone ?? ""}
-                  placeholder="333..."
-                />
-              </div>
-
-              <div>
-                <label>Note</label>
-                <input
-                  className="input"
-                  name="notes"
-                  defaultValue={contactInEdit.notes ?? ""}
-                />
-              </div>
+              <input
+                name="phone"
+                defaultValue={contactEdit.phone ?? ""}
+                className="input"
+                placeholder="Telefono"
+              />
+              <input
+                name="notes"
+                defaultValue={contactEdit.notes ?? ""}
+                className="input"
+                placeholder="Note"
+              />
             </div>
 
-            <div className="row" style={{ marginTop: 14, gap: 8 }}>
-              <button className="btn primary" type="submit">
-                Salva modifiche
-              </button>
-              <Link className="btn" href={cancelEditHref}>
-                Annulla
-              </Link>
-            </div>
+            <button className="btn primary" style={{ marginTop: 10 }} type="submit">
+              Salva
+            </button>
           </form>
         </div>
       ) : null}
@@ -426,35 +510,37 @@ export default async function ClientContactsPage({
           Totale contatti: <b>{client.contacts.length}</b>
         </div>
 
-        <table className="table" style={{ marginTop: 10 }}>
+        <table className="table" style={{ marginTop: 12 }}>
           <thead>
             <tr>
               <th>Ruolo</th>
-              <th>Lista</th>
+              <th>Liste</th>
               <th>Nome</th>
               <th>Email</th>
               <th>Telefono</th>
               <th style={{ width: 220 }}>Azioni</th>
             </tr>
           </thead>
+
           <tbody>
-            {client.contacts.map((ct) => (
-              <tr key={ct.id}>
-                <td className="muted">{ct.role}</td>
-                <td className="muted">{(ct as any).marketingList ?? "ALTRO"}</td>
-                <td>
-                  <b>{ct.name}</b>
-                </td>
-                <td>{ct.email ?? "—"}</td>
-                <td>{ct.phone ?? "—"}</td>
+            {client.contacts.map((c: any) => (
+              <tr key={c.id}>
+                <td>{c.role ?? "ALTRO"}</td>
+                <td>{parseLists(c.marketingList, c.marketingLists).join(", ") || "ALTRO"}</td>
+                <td>{c.name}</td>
+                <td>{c.email ?? "—"}</td>
+                <td>{c.phone ?? "—"}</td>
                 <td>
                   <div className="row" style={{ gap: 8 }}>
-                    <Link className="btn" href={editBaseHref(ct.id)}>
+                    <Link
+                      className="btn"
+                      href={buildUrl({ edit: c.id })}
+                    >
                       Modifica
                     </Link>
 
                     <form action={deleteContact}>
-                      <input type="hidden" name="contactId" value={ct.id} />
+                      <input type="hidden" name="id" value={c.id} />
                       <input type="hidden" name="returnTo" value={returnTo} />
                       <button className="btn" type="submit">
                         Elimina
@@ -467,9 +553,7 @@ export default async function ClientContactsPage({
 
             {client.contacts.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">
-                  Nessun contatto. Creane uno sopra.
-                </td>
+                <td colSpan={6}>Nessun contatto</td>
               </tr>
             ) : null}
           </tbody>

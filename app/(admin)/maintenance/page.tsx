@@ -125,6 +125,7 @@ function buildMaintenanceHref(params: {
 
 export default async function MaintenancePage({ searchParams }: { searchParams: SP }) {
   const { prisma } = await import("@/lib/prisma");
+
   const q = (searchParams.q ?? "").trim();
   const serviceId = (searchParams.serviceId ?? "TUTTI").trim();
   const status = (searchParams.status ?? "TUTTI").trim();
@@ -156,6 +157,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         client: {
           name: {
             contains: q,
+            mode: "insensitive",
           },
         },
       },
@@ -163,6 +165,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         site: {
           name: {
             contains: q,
+            mode: "insensitive",
           },
         },
       },
@@ -170,7 +173,14 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         service: {
           name: {
             contains: q,
+            mode: "insensitive",
           },
+        },
+      },
+      {
+        referenteName: {
+          contains: q,
+          mode: "insensitive",
         },
       },
     ];
@@ -217,7 +227,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
     referente,
   });
 
-  const [catalogRaw, rows, due7Count, due30Count, expiredCount, suggestionClients] =
+  const [catalogRaw, rows, due7Count, due30Count, expiredCount, searchClientSuggestions] =
     await Promise.all([
       prisma.serviceCatalog.findMany({
         where: { isActive: true },
@@ -251,13 +261,14 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         where: q
           ? {
               name: {
-                contains: q,
+                startsWith: q,
+                mode: "insensitive",
               },
             }
-          : {},
+          : undefined,
         select: { name: true },
         orderBy: { name: "asc" },
-        take: q ? 8 : 12,
+        take: 12,
       }),
     ]);
 
@@ -279,7 +290,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
 
   const suggestionNames = Array.from(
     new Set(
-      suggestionClients
+      searchClientSuggestions
         .map((c) => String(c.name ?? "").trim())
         .filter(Boolean)
     )
@@ -297,31 +308,6 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
           font-weight:800;
           line-height:1;
           white-space:nowrap;
-        }
-
-        .searchSuggestions{
-          display:flex;
-          flex-wrap:wrap;
-          gap:8px;
-          margin-top:10px;
-        }
-
-        .searchSuggestion{
-          display:inline-flex;
-          align-items:center;
-          padding:8px 12px;
-          border-radius:12px;
-          background:#ffffff;
-          color:#1e3a8a;
-          border:1px solid rgba(30,58,138,0.18);
-          text-decoration:none;
-          font-weight:800;
-          font-size:13px;
-          box-shadow:0 1px 2px rgba(0,0,0,0.04);
-        }
-
-        .searchSuggestion:hover{
-          background:#eff6ff;
         }
 
         @media print {
@@ -423,30 +409,16 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
               className="input"
               name="q"
               defaultValue={q}
-              placeholder="Nome cliente, sede o servizio..."
+              placeholder="Cliente, sede, servizio o referente..."
               autoComplete="off"
+              list="maintenance-client-suggestions"
             />
-
             {suggestionNames.length > 0 ? (
-              <div className="searchSuggestions">
+              <datalist id="maintenance-client-suggestions">
                 {suggestionNames.map((name) => (
-                  <Link
-                    key={name}
-                    className="searchSuggestion"
-                    href={buildMaintenanceHref({
-                      q: name,
-                      serviceId,
-                      status,
-                      priority,
-                      referente,
-                      from: fromRaw || undefined,
-                      to: toRaw || undefined,
-                    })}
-                  >
-                    {name}
-                  </Link>
+                  <option key={name} value={name} />
                 ))}
-              </div>
+              </datalist>
             ) : null}
           </div>
 
@@ -576,13 +548,13 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
             </tr>
           ))}
 
-          {rowsUnique.length === 0 && (
+          {rowsUnique.length === 0 ? (
             <tr>
               <td colSpan={12} className="muted">
                 Nessun risultato con i filtri selezionati.
               </td>
             </tr>
-          )}
+          ) : null}
         </tbody>
       </table>
     </div>

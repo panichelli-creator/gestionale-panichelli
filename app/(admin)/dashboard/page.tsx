@@ -169,6 +169,32 @@ function sumExtraBilledRowsByMonth(rows: any[], range: { start: Date; end: Date 
   return { monthTotals, total };
 }
 
+function sumTrainingRevenueByMonth(rows: any[], range: { start: Date; end: Date }) {
+  const monthTotals = Array(12).fill(0) as number[];
+  let total = 0;
+
+  for (const row of rows) {
+    if (row?.fatturata !== true) continue;
+
+    const d =
+      isValidDate(row?.fatturataAt)
+        ? new Date(row.fatturataAt)
+        : isValidDate(row?.updatedAt)
+        ? new Date(row.updatedAt)
+        : null;
+
+    if (!inRange(d, range.start, range.end)) continue;
+
+    const eur = toNum(row?.priceEur);
+    const mi = monthIndexUtc(d!);
+
+    monthTotals[mi] += eur;
+    total += eur;
+  }
+
+  return { monthTotals, total };
+}
+
 function normalizeReferenteName(value: any) {
   const raw = String(value ?? "").trim().toUpperCase();
   if (!raw) return "PHSC";
@@ -249,25 +275,6 @@ function sectionCardStyle(color: "green" | "blue" | "yellow" | "red" | "cyan" | 
   return { border: "1px solid rgba(168,85,247,0.25)", background: "rgba(168,85,247,0.04)" };
 }
 
-function getClientPhone(client: any, contacts?: any[]) {
-  const direct = String(client?.phone ?? "").trim();
-  if (direct) return direct;
-
-  const list = Array.isArray(contacts) ? contacts : [];
-  const preferred =
-    list.find((c) => {
-      const role = String(c?.role ?? "").toUpperCase();
-      return (
-        role.includes("REFERENTE") ||
-        role.includes("TITOLARE") ||
-        role.includes("SEGRETERIA") ||
-        role.includes("AMMINISTRAZIONE")
-      );
-    }) ?? list.find((c) => String(c?.phone ?? "").trim());
-
-  return String(preferred?.phone ?? "").trim() || "—";
-}
-
 function isRxServiceRow(row: any) {
   const serviceName = String(row?.service?.name ?? "").trim().toUpperCase();
   const end = toNum(row?.rxEndoralCount);
@@ -339,6 +346,85 @@ function calcVseRevenue(rows: any[], range: { start: Date; end: Date }) {
   return { total, referente, delta: total - referente };
 }
 
+function normalizePracticeStatus(value: any) {
+  return String(value ?? "IN_ATTESA").trim().toUpperCase() || "IN_ATTESA";
+}
+
+function normalizeBillingStatus(value: any) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function sumBillingByMonth(rows: any[], range: { start: Date; end: Date }, statuses?: string[]) {
+  const monthTotals = Array(12).fill(0) as number[];
+  let total = 0;
+
+  for (const row of rows) {
+    const status = normalizeBillingStatus(row?.billingStatus);
+    if (statuses?.length && !statuses.includes(status)) continue;
+
+    const d = pickDate(row);
+    if (!inRange(d, range.start, range.end)) continue;
+
+    const amount = toNum(row?.amountEur);
+    const mi = monthIndexUtc(d!);
+
+    monthTotals[mi] += amount;
+    total += amount;
+  }
+
+  return { monthTotals, total };
+}
+
+function normalizeServiceName(value: any) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function categorizeServiceName(value: any) {
+  const s = normalizeServiceName(value);
+
+  if (!s) return null;
+
+  if (s.includes("LEGIONELLA")) return "LEGIONELLA";
+
+  if (
+    s.includes("DVR") ||
+    s.includes("SICUREZZA") ||
+    s.includes("RSPP") ||
+    s.includes("VALUTAZIONE RISCHI")
+  ) {
+    return "SICUREZZA (DVR)";
+  }
+
+  if (
+    s.includes("RX") ||
+    s.includes("RADIO")
+  ) {
+    return "RX";
+  }
+
+  return null;
+}
+
+function buildCategoryMapFromServiceRows(rows: any[]) {
+  const map = new Map<string, number>();
+
+  for (const row of rows) {
+    if (!row?.dueDate) continue;
+
+    const category = categorizeServiceName(row?.service?.name);
+    if (!category) continue;
+
+    map.set(category, (map.get(category) ?? 0) + toNum(row?.priceEur));
+  }
+
+  return map;
+}
+
+function mergeCategoryValue(map: Map<string, number>, key: string, value: number) {
+  if (!value) return;
+  map.set(key, (map.get(key) ?? 0) + value);
+}
+
 export default async function DashboardPage({ searchParams }: { searchParams: SP }) {
   const { prisma } = await import("@/lib/prisma");
   const now = new Date();
@@ -354,7 +440,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
   const yearsOptions = Array.from({ length: 7 }, (_, i) => defaultYear - 3 + i);
 
   const today = startOfTodayLocal();
-  const in7 = addDays(today, 7);
   const in30 = addDays(today, 30);
   const in60 = addDays(today, 60);
   const in90 = addDays(today, 90);
@@ -465,6 +550,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
     "administrativePractices",
   ]);
 
+  const billingStepRowsPromise = prisma.practiceBillingStep.findMany({
+    include: {
+      practice: {
+        include: {
+          client: true,
+        },
+      },
+    },
+    take: 200000,
+  });
+
+  const trainingRowsPromise = prisma.trainingRecord.findMany({
+    take: 200000,
+  });
+
   const training30Promise = prisma.trainingRecord.count({
     where: {
       dueDate: { gte: today, lte: in30 },
@@ -560,6 +660,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
     maintenance30Rows,
     vseRows,
     practiceRows,
+    billingStepRows,
+    trainingRows,
     training30,
     training60,
     training90,
@@ -579,6 +681,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
     maintenance30RowsPromise,
     vseRowsPromise,
     practiceRowsPromise,
+    billingStepRowsPromise,
+    trainingRowsPromise,
     training30Promise,
     training60Promise,
     training90Promise,
@@ -617,18 +721,28 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
   }
 
   const extraVseA = sumExtraBilledRowsByMonth(vseRows, rA);
-  const extraPracticesA = sumExtraBilledRowsByMonth(practiceRows, rA);
+  const billingFatturatoA = sumBillingByMonth(
+    billingStepRows as any[],
+    rA,
+    ["FATTURATA", "INCASSATA"]
+  );
+  const billingIncassatoA = sumBillingByMonth(
+    billingStepRows as any[],
+    rA,
+    ["INCASSATA"]
+  );
+  const trainingRevenueA = sumTrainingRevenueByMonth(trainingRows as any[], rA);
 
   for (let i = 0; i < 12; i++) {
-    monthTotalsA[i] += extraVseA.monthTotals[i] + extraPracticesA.monthTotals[i];
+    monthTotalsA[i] += extraVseA.monthTotals[i] + billingFatturatoA.monthTotals[i] + trainingRevenueA.monthTotals[i];
   }
 
   if (extraVseA.total > 0) {
     byServiceA.set("VSE", (byServiceA.get("VSE") ?? 0) + extraVseA.total);
   }
 
-  if (extraPracticesA.total > 0) {
-    byServiceA.set("PRATICHE", (byServiceA.get("PRATICHE") ?? 0) + extraPracticesA.total);
+  if (billingFatturatoA.total > 0) {
+    byServiceA.set("PRATICHE", (byServiceA.get("PRATICHE") ?? 0) + billingFatturatoA.total);
   }
 
   const totalYearA = monthTotalsA.reduce((a, b) => a + b, 0);
@@ -638,7 +752,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
   let totalEndB = 0;
   let totalOptB = 0;
   let extraVseB = { monthTotals: Array(12).fill(0) as number[], total: 0 };
-  let extraPracticesB = { monthTotals: Array(12).fill(0) as number[], total: 0 };
+  let billingFatturatoB = { monthTotals: Array(12).fill(0) as number[], total: 0 };
+  let billingIncassatoB = { monthTotals: Array(12).fill(0) as number[], total: 0 };
+  let trainingRevenueB = { monthTotals: Array(12).fill(0) as number[], total: 0 };
 
   if (compareYear) {
     for (const r of rowsB as any[]) {
@@ -656,18 +772,28 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
     }
 
     extraVseB = sumExtraBilledRowsByMonth(vseRows, rB!);
-    extraPracticesB = sumExtraBilledRowsByMonth(practiceRows, rB!);
+    billingFatturatoB = sumBillingByMonth(
+      billingStepRows as any[],
+      rB!,
+      ["FATTURATA", "INCASSATA"]
+    );
+    billingIncassatoB = sumBillingByMonth(
+      billingStepRows as any[],
+      rB!,
+      ["INCASSATA"]
+    );
+    trainingRevenueB = sumTrainingRevenueByMonth(trainingRows as any[], rB!);
 
     for (let i = 0; i < 12; i++) {
-      monthTotalsB[i] += extraVseB.monthTotals[i] + extraPracticesB.monthTotals[i];
+      monthTotalsB[i] += extraVseB.monthTotals[i] + billingFatturatoB.monthTotals[i] + trainingRevenueB.monthTotals[i];
     }
 
     if (extraVseB.total > 0) {
       byServiceB.set("VSE", (byServiceB.get("VSE") ?? 0) + extraVseB.total);
     }
 
-    if (extraPracticesB.total > 0) {
-      byServiceB.set("PRATICHE", (byServiceB.get("PRATICHE") ?? 0) + extraPracticesB.total);
+    if (billingFatturatoB.total > 0) {
+      byServiceB.set("PRATICHE", (byServiceB.get("PRATICHE") ?? 0) + billingFatturatoB.total);
     }
   }
 
@@ -681,9 +807,22 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
   const totalVseB = compareYear ? extraVseB.total : 0;
   const deltaVse = compareYear ? totalVseA - totalVseB : 0;
 
-  const totalPracticesA = extraPracticesA.total;
-  const totalPracticesB = compareYear ? extraPracticesB.total : 0;
+  const totalPracticesA = billingFatturatoA.total;
+  const totalPracticesB = compareYear ? billingFatturatoB.total : 0;
   const deltaPractices = compareYear ? totalPracticesA - totalPracticesB : 0;
+
+  const totalBillingFatturatoA = billingFatturatoA.total;
+  const totalBillingFatturatoB = compareYear ? billingFatturatoB.total : 0;
+  const deltaBillingFatturato = compareYear ? totalBillingFatturatoA - totalBillingFatturatoB : 0;
+
+  const totalBillingIncassatoA = billingIncassatoA.total;
+  const totalBillingIncassatoB = compareYear ? billingIncassatoB.total : 0;
+  const deltaBillingIncassato = compareYear ? totalBillingIncassatoA - totalBillingIncassatoB : 0;
+
+  const totalTrainingRevenueA = trainingRevenueA.total;
+  const totalTrainingRevenueB = compareYear ? trainingRevenueB.total : 0;
+  const deltaTrainingRevenue = compareYear ? totalTrainingRevenueA - totalTrainingRevenueB : 0;
+  const trainingRevenueTone = deltaTone(deltaTrainingRevenue);
 
   const allServiceNames = new Set<string>([
     ...Array.from(byServiceA.keys()),
@@ -714,14 +853,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
     })
     .sort((x, y) => y.a - x.a);
 
-  const serviziClientServiceA = totalYearA - totalVseA - totalPracticesA;
-  const serviziClientServiceB = compareYear ? totalYearB - totalVseB - totalPracticesB : 0;
+  const serviziClientServiceA = rowsA.reduce((acc: number, r: any) => acc + toNum(r?.priceEur), 0);
+  const serviziClientServiceB = compareYear
+    ? (rowsB as any[]).reduce((acc: number, r: any) => acc + toNum(r?.priceEur), 0)
+    : 0;
   const deltaServiziNetti = compareYear ? serviziClientServiceA - serviziClientServiceB : 0;
 
   const yearDeltaTone = deltaTone(deltaYear);
-  const vseDeltaTone = deltaTone(deltaVse);
   const praticheDeltaTone = deltaTone(deltaPractices);
-  const serviziDeltaTone = deltaTone(deltaServiziNetti);
+  const billingFatturatoTone = deltaTone(deltaBillingFatturato);
+  const billingIncassatoTone = deltaTone(deltaBillingIncassato);
 
   const rxA = calcRxRevenue(rowsA as any[]);
   const rxB = compareYear ? calcRxRevenue(rowsB as any[]) : { total: 0, referente: 0, delta: 0 };
@@ -740,6 +881,59 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
   const vseCardDelta = deltaTone(vseRevenueA.delta);
   const vseCompareTone = deltaTone(vseRevenueCompareDelta);
   const vseReferenteCompareTone = deltaTone(vseReferenteCompareDelta);
+
+  const categoryTotalsA = buildCategoryMapFromServiceRows(rowsA as any[]);
+  const categoryTotalsB = compareYear ? buildCategoryMapFromServiceRows(rowsB as any[]) : new Map<string, number>();
+
+  mergeCategoryValue(categoryTotalsA, "VSE", totalVseA);
+  mergeCategoryValue(categoryTotalsB, "VSE", totalVseB);
+
+  const categoryKeys = ["VSE", "RX", "LEGIONELLA", "SICUREZZA (DVR)"];
+
+  const categoryRows = categoryKeys.map((name) => {
+    const a = categoryTotalsA.get(name) ?? 0;
+    const b = categoryTotalsB.get(name) ?? 0;
+    return {
+      name,
+      a,
+      b,
+      delta: compareYear ? a - b : 0,
+    };
+  });
+
+  const categoryTotalA = categoryRows.reduce((acc, row) => acc + row.a, 0);
+  const categoryTotalB = categoryRows.reduce((acc, row) => acc + row.b, 0);
+  const categoryTotalDelta = compareYear ? categoryTotalA - categoryTotalB : 0;
+  const categoryTotalTone = deltaTone(categoryTotalDelta);
+
+  const apertureRows = (practiceRows as any[]).filter((row) => row?.inApertureList === true);
+  const apertureTotal = apertureRows.length;
+  const apertureInAttesa = apertureRows.filter(
+    (row) => normalizePracticeStatus(row?.apertureStatus) === "IN_ATTESA"
+  ).length;
+  const apertureInCorso = apertureRows.filter((row) =>
+    ["INVIATA_REGIONE", "INIZIO_LAVORI", "ACCETTATO", "ISPEZIONE_ASL"].includes(
+      normalizePracticeStatus(row?.apertureStatus)
+    )
+  ).length;
+  const apertureConcluse = apertureRows.filter(
+    (row) => normalizePracticeStatus(row?.apertureStatus) === "CONCLUSO"
+  ).length;
+
+  const billingRows = billingStepRows as any[];
+  const billingDaFatturareCount = billingRows.filter(
+    (row) => normalizeBillingStatus(row?.billingStatus) === "DA_FATTURARE"
+  ).length;
+  const billingDaInviareCount = billingRows.filter(
+    (row) => normalizeBillingStatus(row?.billingStatus) === "FATTURA_DA_INVIARE"
+  ).length;
+  const billingFatturateCount = billingRows.filter(
+    (row) => normalizeBillingStatus(row?.billingStatus) === "FATTURATA"
+  ).length;
+  const billingIncassateCount = billingRows.filter(
+    (row) => normalizeBillingStatus(row?.billingStatus) === "INCASSATA"
+  ).length;
+  const billingTotal = billingRows.reduce((acc, row) => acc + toNum(row?.amountEur), 0);
 
   return (
     <div className="card">
@@ -824,9 +1018,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
           </div>
         </div>
 
-        <Link className="btn primary" href="/maintenance">
-          Vai a Mantenimenti
-        </Link>
+        <div className="row" style={{ gap: 8 }}>
+          <Link className="btn" href="/maintenance">
+            Vai a Mantenimenti
+          </Link>
+          <Link className="btn primary" href="/pratiche-fatturazione">
+            Vai a Pratiche fatturazione
+          </Link>
+        </div>
       </div>
 
       <form method="GET" className="card" style={{ marginTop: 12 }}>
@@ -872,12 +1071,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
       <div className="reportSection">
         <h2 className="sectionTitle">Sintesi fatturato</h2>
         <div className="sectionSub">
-          Tutta la parte economica e servizi in alto, più compatta e leggibile.
+          Sintesi principale semplificata.
         </div>
 
         <div className="gridTop">
           <div className="card kpiCard" style={sectionCardStyle("green")}>
-            <div className="kpiLabel">Totale annuo previsto ({year})</div>
+            <div className="kpiLabel">Totale annuo ({year})</div>
             <div className="kpiValue">{fmtEur(totalYearA)}</div>
             {compareYear ? (
               <div className="kpiSub">
@@ -890,68 +1089,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
             )}
           </div>
 
-          <div className="card kpiCard" style={sectionCardStyle("blue")}>
-            <div className="kpiLabel">Servizi da ClientService ({year})</div>
-            <div className="kpiValue">{fmtEur(serviziClientServiceA)}</div>
-            {compareYear ? (
-              <div className="kpiSub">
-                <span className="deltaBadge" style={serviziDeltaTone as any}>
-                  {compareYear}: {fmtEur(serviziClientServiceB)} • Δ {fmtEur(deltaServiziNetti)}
-                </span>
-              </div>
-            ) : (
-              <div className="kpiSub">Fatturato servizi ricorrenti</div>
-            )}
-          </div>
-
-          <div className="card kpiCard" style={sectionCardStyle("green")}>
-            <div className="kpiLabel">Valore previsto 30 giorni</div>
-            <div className="kpiValue">{fmtEur(value30)}</div>
-            <div className="kpiSub">RX End: {end30} • RX OPT: {opt30}</div>
-          </div>
-
-          <div className="card kpiCard" style={sectionCardStyle("green")}>
-            <div className="kpiLabel">Fatturato VSE ({year})</div>
-            <div className="kpiValue">{fmtEur(vseRevenueA.total)}</div>
-            <div className="kpiSub">Referente/tecnico: {fmtEur(vseRevenueA.referente)}</div>
-            <div className="kpiSub">
-              <span className="deltaBadge" style={vseCardDelta as any}>
-                Delta: {fmtEur(vseRevenueA.delta)}
-              </span>
-            </div>
-            {compareYear ? (
-              <div className="kpiSub">
-                <span className="deltaBadge" style={vseCompareTone as any}>
-                  {compareYear} fatturato: {fmtEur(vseRevenueB.total)}
-                </span>{" "}
-                <span className="deltaBadge" style={vseReferenteCompareTone as any}>
-                  {compareYear} referente: {fmtEur(vseRevenueB.referente)}
-                </span>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="card kpiCard" style={sectionCardStyle("cyan")}>
-            <div className="kpiLabel">Fatturato RX ({year})</div>
-            <div className="kpiValue">{fmtEur(rxA.total)}</div>
-            <div className="kpiSub">Referenti RX: {fmtEur(rxA.referente)}</div>
-            <div className="kpiSub">
-              <span className="deltaBadge" style={rxCardDelta as any}>
-                Delta: {fmtEur(rxA.delta)}
-              </span>
-            </div>
-            {compareYear ? (
-              <div className="kpiSub">
-                <span className="deltaBadge" style={rxCompareTone as any}>
-                  {compareYear} fatturato: {fmtEur(rxB.total)}
-                </span>{" "}
-                <span className="deltaBadge" style={rxReferenteCompareTone as any}>
-                  {compareYear} referenti: {fmtEur(rxB.referente)}
-                </span>
-              </div>
-            ) : null}
-          </div>
-
           <div className="card kpiCard" style={sectionCardStyle("violet")}>
             <div className="kpiLabel">Fatturato Pratiche ({year})</div>
             <div className="kpiValue">{fmtEur(totalPracticesA)}</div>
@@ -962,7 +1099,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
                 </span>
               </div>
             ) : (
-              <div className="kpiSub">Da migliorare con incassi a step</div>
+              <div className="kpiSub">Allineato ai SAL fatturati/incassati</div>
             )}
           </div>
 
@@ -983,6 +1120,99 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
             <div className="kpiLabel">Clienti attivi</div>
             <div className="kpiValue">{activeClientsCount}</div>
             <div className="kpiSub">Base clienti attualmente attiva</div>
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("blue")}>
+            <div className="kpiLabel">Fatturato Formazione ({year})</div>
+            <div className="kpiValue">{fmtEur(totalTrainingRevenueA)}</div>
+            {compareYear ? (
+              <div className="kpiSub">
+                <span className="deltaBadge" style={trainingRevenueTone as any}>
+                  {compareYear}: {fmtEur(totalTrainingRevenueB)} • Δ {fmtEur(deltaTrainingRevenue)}
+                </span>
+              </div>
+            ) : (
+              <div className="kpiSub">Solo record con fatturata=true e fatturataAt nell’anno</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="reportSection">
+        <h2 className="sectionTitle">Fatturato per servizio</h2>
+        <div className="sectionSub">
+          Voci principali di servizio senza formazione.
+        </div>
+
+        <div className="gridTop">
+          <div className="card kpiCard" style={sectionCardStyle("green")}>
+            <div className="kpiLabel">Totale servizi selezionati ({year})</div>
+            <div className="kpiValue">{fmtEur(categoryTotalA)}</div>
+            {compareYear ? (
+              <div className="kpiSub">
+                <span className="deltaBadge" style={categoryTotalTone as any}>
+                  {compareYear}: {fmtEur(categoryTotalB)} • Δ {fmtEur(categoryTotalDelta)}
+                </span>
+              </div>
+            ) : (
+              <div className="kpiSub">VSE + RX + Legionella + Sicurezza</div>
+            )}
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("green")}>
+            <div className="kpiLabel">Fatturato VSE ({year})</div>
+            <div className="kpiValue">{fmtEur(categoryRows.find((x) => x.name === "VSE")?.a ?? 0)}</div>
+            {compareYear ? (
+              <div className="kpiSub">
+                <span className="deltaBadge" style={deltaTone(categoryRows.find((x) => x.name === "VSE")?.delta ?? 0) as any}>
+                  {compareYear}: {fmtEur(categoryRows.find((x) => x.name === "VSE")?.b ?? 0)} • Δ {fmtEur(categoryRows.find((x) => x.name === "VSE")?.delta ?? 0)}
+                </span>
+              </div>
+            ) : (
+              <div className="kpiSub">VSE fatturate</div>
+            )}
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("cyan")}>
+            <div className="kpiLabel">Fatturato RX ({year})</div>
+            <div className="kpiValue">{fmtEur(categoryRows.find((x) => x.name === "RX")?.a ?? 0)}</div>
+            {compareYear ? (
+              <div className="kpiSub">
+                <span className="deltaBadge" style={deltaTone(categoryRows.find((x) => x.name === "RX")?.delta ?? 0) as any}>
+                  {compareYear}: {fmtEur(categoryRows.find((x) => x.name === "RX")?.b ?? 0)} • Δ {fmtEur(categoryRows.find((x) => x.name === "RX")?.delta ?? 0)}
+                </span>
+              </div>
+            ) : (
+              <div className="kpiSub">Servizi RX</div>
+            )}
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("yellow")}>
+            <div className="kpiLabel">Fatturato Legionella ({year})</div>
+            <div className="kpiValue">{fmtEur(categoryRows.find((x) => x.name === "LEGIONELLA")?.a ?? 0)}</div>
+            {compareYear ? (
+              <div className="kpiSub">
+                <span className="deltaBadge" style={deltaTone(categoryRows.find((x) => x.name === "LEGIONELLA")?.delta ?? 0) as any}>
+                  {compareYear}: {fmtEur(categoryRows.find((x) => x.name === "LEGIONELLA")?.b ?? 0)} • Δ {fmtEur(categoryRows.find((x) => x.name === "LEGIONELLA")?.delta ?? 0)}
+                </span>
+              </div>
+            ) : (
+              <div className="kpiSub">Servizi Legionella</div>
+            )}
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("violet")}>
+            <div className="kpiLabel">Fatturato Sicurezza (DVR) ({year})</div>
+            <div className="kpiValue">{fmtEur(categoryRows.find((x) => x.name === "SICUREZZA (DVR)")?.a ?? 0)}</div>
+            {compareYear ? (
+              <div className="kpiSub">
+                <span className="deltaBadge" style={deltaTone(categoryRows.find((x) => x.name === "SICUREZZA (DVR)")?.delta ?? 0) as any}>
+                  {compareYear}: {fmtEur(categoryRows.find((x) => x.name === "SICUREZZA (DVR)")?.b ?? 0)} • Δ {fmtEur(categoryRows.find((x) => x.name === "SICUREZZA (DVR)")?.delta ?? 0)}
+                </span>
+              </div>
+            ) : (
+              <div className="kpiSub">DVR e sicurezza</div>
+            )}
           </div>
         </div>
       </div>
@@ -1044,7 +1274,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
             <div>
               <h2 style={{ fontSize: 16, fontWeight: 900, margin: 0 }}>Totali per servizio</h2>
               <div className="sectionSub" style={{ marginTop: 4 }}>
-                Le aree che producono di più nell’anno selezionato.
+                Elenco completo servizi rilevati nell’anno selezionato.
               </div>
             </div>
           </div>
@@ -1092,74 +1322,99 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
       </div>
 
       <div className="reportSection">
-        <h2 className="sectionTitle">Qualità anagrafica clienti</h2>
-        <div className="sectionSub">
-          Controlli anagrafici separati dal fatturato.
-        </div>
-
-        <div className="grid3" style={{ marginTop: 12 }}>
-          <div className="card kpiCard" style={sectionCardStyle("red")}>
-            <div className="kpiLabel">Clienti senza contatti</div>
-            <div className="kpiValue">{missingContactsCount}</div>
-            <div style={{ marginTop: 10 }}>
-              <Link className="btn" href="/contacts/missing">
-                Apri lista
-              </Link>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h2 className="sectionTitle">Pratiche</h2>
+            <div className="sectionSub">
+              Controllo veloce dello stato aperture direttamente dalla dashboard.
             </div>
           </div>
-
-          <div className="card kpiCard" style={sectionCardStyle("yellow")}>
-            <div className="kpiLabel">Clienti senza email</div>
-            <div className="kpiValue">{missingEmailCount}</div>
-            <div style={{ marginTop: 10 }}>
-              <Link className="btn" href="/contacts/missing">
-                Apri lista
-              </Link>
-            </div>
-          </div>
-
-          <div className="card kpiCard" style={sectionCardStyle("blue")}>
-            <div className="kpiLabel">Clienti senza telefono</div>
-            <div className="kpiValue">{missingPhoneCount}</div>
-            <div style={{ marginTop: 10 }}>
-              <Link className="btn" href="/contacts/missing">
-                Apri lista
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="reportSection">
-        <h2 className="sectionTitle">Scadenze e scadenzario</h2>
-        <div className="sectionSub">
-          Solo scadenze essenziali.
+          <Link className="btn primary" href="/pratiche-fatturazione">
+            Apri fatturazione pratiche
+          </Link>
         </div>
 
         <div className="gridTop">
+          <div className="card kpiCard" style={sectionCardStyle("violet")}>
+            <div className="kpiLabel">Pratiche totali</div>
+            <div className="kpiValue">{apertureTotal}</div>
+            <div style={{ marginTop: 10 }}>
+              <Link className="btn" href="/aperture">
+                Apri pratiche
+              </Link>
+            </div>
+          </div>
+
           <div className="card kpiCard" style={sectionCardStyle("yellow")}>
-            <div className="kpiLabel">Scadenze 30 giorni</div>
-            <div className="kpiValue">{maintenance30}</div>
+            <div className="kpiLabel">Pratiche in attesa</div>
+            <div className="kpiValue">{apertureInAttesa}</div>
+            <div className="kpiSub">Da avviare o da prendere in carico</div>
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("blue")}>
+            <div className="kpiLabel">Pratiche in corso</div>
+            <div className="kpiValue">{apertureInCorso}</div>
+            <div className="kpiSub">Regione, inizio lavori, accettato, ispezione</div>
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("green")}>
+            <div className="kpiLabel">Pratiche concluse</div>
+            <div className="kpiValue">{apertureConcluse}</div>
+            <div className="kpiSub">Chiuse e completate</div>
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("yellow")}>
+            <div className="kpiLabel">SAL totali</div>
+            <div className="kpiValue">{billingRows.length}</div>
+            <div className="kpiSub">Tutte le righe di fatturazione pratica</div>
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("yellow")}>
+            <div className="kpiLabel">SAL da fatturare</div>
+            <div className="kpiValue">{billingDaFatturareCount}</div>
+            <div className="kpiSub">Ancora non attivati</div>
           </div>
 
           <div className="card kpiCard" style={sectionCardStyle("red")}>
-            <div className="kpiLabel">Formazione scaduta</div>
-            <div className="kpiValue">{trainingExpired}</div>
+            <div className="kpiLabel">SAL da inviare</div>
+            <div className="kpiValue">{billingDaInviareCount}</div>
+            <div className="kpiSub">Da emettere/subito visibili ad amministrazione</div>
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("green")}>
+            <div className="kpiLabel">SAL fatturate</div>
+            <div className="kpiValue">{billingFatturateCount}</div>
+            <div className="kpiSub">
+              Fatturato SAL anno: {fmtEur(totalBillingFatturatoA)}
+            </div>
+            {compareYear ? (
+              <div className="kpiSub">
+                <span className="deltaBadge" style={billingFatturatoTone as any}>
+                  {compareYear}: {fmtEur(totalBillingFatturatoB)} • Δ {fmtEur(deltaBillingFatturato)}
+                </span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("green")}>
+            <div className="kpiLabel">SAL incassate</div>
+            <div className="kpiValue">{billingIncassateCount}</div>
+            <div className="kpiSub">
+              Incassato SAL anno: {fmtEur(totalBillingIncassatoA)}
+            </div>
+            {compareYear ? (
+              <div className="kpiSub">
+                <span className="deltaBadge" style={billingIncassatoTone as any}>
+                  {compareYear}: {fmtEur(totalBillingIncassatoB)} • Δ {fmtEur(deltaBillingIncassato)}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           <div className="card kpiCard" style={sectionCardStyle("yellow")}>
-            <div className="kpiLabel">Formazione entro 30gg</div>
-            <div className="kpiValue">{training30}</div>
-          </div>
-
-          <div className="card kpiCard" style={sectionCardStyle("yellow")}>
-            <div className="kpiLabel">Formazione entro 90gg</div>
-            <div className="kpiValue">{training90}</div>
-          </div>
-
-          <div className="card kpiCard" style={sectionCardStyle("red")}>
-            <div className="kpiLabel">Mantenimenti scaduti</div>
-            <div className="kpiValue">{maintenanceExpired}</div>
+            <div className="kpiLabel">Totale importi SAL</div>
+            <div className="kpiValue">{fmtEur(billingTotal)}</div>
+            <div className="kpiSub">Somma di tutte le righe SAL</div>
           </div>
         </div>
       </div>
@@ -1200,7 +1455,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
           </table>
 
           <div className="muted" style={{ marginTop: 8 }}>
-            Entro 30gg: <b>{training30}</b> • Entro 60gg: <b>{training60}</b> • Entro 90gg: <b>{training90}</b>
+            Entro 30gg: <b>{training30}</b> • Entro 60gg: <b>{training60}</b> • Entro 90gg: <b>{training90}</b> • Scaduti: <b>{trainingExpired}</b>
           </div>
         </div>
 
@@ -1237,6 +1492,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
               )}
             </tbody>
           </table>
+
+          <div className="muted" style={{ marginTop: 8 }}>
+            Entro 30gg: <b>{maintenance30}</b> • Scaduti: <b>{maintenanceExpired}</b> • Valore 30gg: <b>{fmtEur(value30)}</b>
+          </div>
         </div>
 
         <div className="card">
@@ -1267,6 +1526,81 @@ export default async function DashboardPage({ searchParams }: { searchParams: SP
                 <tr>
                   <td colSpan={3} className="muted">
                     Nessuna VSE entro 90 giorni.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="reportSection">
+        <h2 className="sectionTitle">Qualità anagrafica</h2>
+        <div className="sectionSub">
+          Controllo rapido dei dati mancanti nei contatti clienti.
+        </div>
+
+        <div className="gridTop">
+          <div className="card kpiCard" style={sectionCardStyle("yellow")}>
+            <div className="kpiLabel">Clienti senza contatti</div>
+            <div className="kpiValue">{missingContactsCount}</div>
+            <div className="kpiSub">Nessun contatto associato</div>
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("red")}>
+            <div className="kpiLabel">Contatti senza email</div>
+            <div className="kpiValue">{missingEmailCount}</div>
+            <div className="kpiSub">Clienti con contatti ma senza email valorizzata</div>
+          </div>
+
+          <div className="card kpiCard" style={sectionCardStyle("red")}>
+            <div className="kpiLabel">Contatti senza telefono</div>
+            <div className="kpiValue">{missingPhoneCount}</div>
+            <div className="kpiSub">Clienti con contatti ma senza telefono valorizzato</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="reportSection">
+        <h2 className="sectionTitle">Referenti RX</h2>
+        <div className="sectionSub">
+          Totali economici per referente esterno sui servizi RX.
+        </div>
+
+        <div className="card" style={{ marginTop: 12 }}>
+          <table className="table tableClean">
+            <thead>
+              <tr>
+                <th>Referente</th>
+                <th>{year}</th>
+                {compareYear && <th>{compareYear}</th>}
+                {compareYear && <th>Δ</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {referenteRows.map((r) => {
+                const tone = deltaTone(r.delta);
+
+                return (
+                  <tr key={r.name}>
+                    <td>{r.name}</td>
+                    <td>{fmtEur(r.a)}</td>
+                    {compareYear && <td>{fmtEur(r.b)}</td>}
+                    {compareYear && (
+                      <td>
+                        <span className="deltaBadge" style={tone as any}>
+                          {fmtEur(r.delta)}
+                        </span>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+
+              {referenteRows.length === 0 && (
+                <tr>
+                  <td colSpan={compareYear ? 4 : 2} className="muted">
+                    Nessun referente esterno rilevato.
                   </td>
                 </tr>
               )}

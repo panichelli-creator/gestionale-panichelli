@@ -1,117 +1,154 @@
 import Link from "next/link";
 
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+type SP = {
+  q?: string;
+  marketingList?: string;
+};
+
+function normalizeText(value: any) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function splitMarketingLists(...values: any[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of values) {
+    if (value == null) continue;
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const v = String(item ?? "").trim().toUpperCase();
+        if (!v || seen.has(v)) continue;
+        seen.add(v);
+        out.push(v);
+      }
+      continue;
+    }
+
+    const raw = String(value ?? "").trim();
+    if (!raw) continue;
+
+    if (
+      (raw.startsWith("[") && raw.endsWith("]")) ||
+      (raw.startsWith('["') && raw.endsWith('"]'))
+    ) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            const v = String(item ?? "").trim().toUpperCase();
+            if (!v || seen.has(v)) continue;
+            seen.add(v);
+            out.push(v);
+          }
+          continue;
+        }
+      } catch {}
+    }
+
+    for (const part of raw.split(",")) {
+      const v = String(part ?? "").trim().toUpperCase();
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
+  }
+
+  return out;
+}
 
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams?: {
-    q?: string;
-    role?: string;
-    marketingList?: string;
-    type?: string;
-    service?: string;
-  };
+  searchParams?: SP | Promise<SP>;
 }) {
   const { prisma } = await import("@/lib/prisma");
-  const q = String(searchParams?.q ?? "").trim();
-  const role = String(searchParams?.role ?? "").trim();
-  const marketingList = String(searchParams?.marketingList ?? "").trim();
-  const type = String(searchParams?.type ?? "").trim();
-  const service = String(searchParams?.service ?? "").trim();
 
-  const contacts = await prisma.clientContact.findMany({
-    where: {
-      AND: [
-        q
-          ? {
-              OR: [
-                { name: { contains: q } },
-                { email: { contains: q } },
-                { phone: { contains: q } },
-              ],
-            }
-          : {},
-        role ? { role } : {},
-        marketingList ? { marketingList } : {},
-        type
-          ? {
-              client: {
-                type,
-              },
-            }
-          : {},
-        service
-          ? {
-              client: {
-                services: {
-                  some: {
-                    service: {
-                      name: service,
-                    },
-                  },
-                },
-              },
-            }
-          : {},
-      ],
-    },
+  const resolvedSearchParams =
+    searchParams && typeof (searchParams as Promise<SP>).then === "function"
+      ? await (searchParams as Promise<SP>)
+      : ((searchParams as SP | undefined) ?? {});
+
+  const q = String(resolvedSearchParams?.q ?? "").trim();
+  const qNorm = normalizeText(q);
+  const marketingList = String(resolvedSearchParams?.marketingList ?? "")
+    .trim()
+    .toUpperCase();
+
+  const allContacts = await prisma.clientContact.findMany({
     include: {
       client: true,
     },
-    orderBy: [{ marketingList: "asc" }, { role: "asc" }, { name: "asc" }],
+    orderBy: {
+      name: "asc",
+    },
   });
 
-  const roles = await prisma.clientContact.findMany({
-    select: { role: true },
-    distinct: ["role"],
-    orderBy: { role: "asc" },
+  const contacts = allContacts.filter((c: any) => {
+    const haystack = normalizeText(
+      [
+        c?.name,
+        c?.email,
+        c?.phone,
+        c?.role,
+        c?.notes,
+        c?.client?.name,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+    const matchesQ = !qNorm || haystack.includes(qNorm);
+
+    const lists = splitMarketingLists(c?.marketingList);
+    const matchesList = !marketingList || lists.includes(marketingList);
+
+    return matchesQ && matchesList;
   });
 
-  const marketingLists = await prisma.clientContact.findMany({
-    select: { marketingList: true },
-    distinct: ["marketingList"],
-    orderBy: { marketingList: "asc" },
-  });
+  const uniqueLists: string[] = [];
+  const seen = new Set<string>();
 
-  const types = await prisma.client.findMany({
-    select: { type: true },
-    distinct: ["type"],
-    orderBy: { type: "asc" },
-  });
+  for (const row of allContacts as any[]) {
+    const lists = splitMarketingLists(row?.marketingList);
 
-  const services = await prisma.serviceCatalog.findMany({
-    select: { name: true },
-    orderBy: { name: "asc" },
-  });
+    for (const value of lists) {
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      uniqueLists.push(value);
+    }
+  }
+
+  uniqueLists.sort((a, b) => a.localeCompare(b, "it"));
 
   const exportUrl =
     "/api/contacts/export?" +
     new URLSearchParams({
       q,
-      role,
       marketingList,
-      type,
-      service,
     }).toString();
 
   const exportVoxmailUrl =
     "/api/contacts/export-voxmail?" +
     new URLSearchParams({
       q,
-      role,
       marketingList,
-      type,
-      service,
     }).toString();
 
   return (
     <div className="card">
       <div
         className="row"
-        style={{ justifyContent: "space-between", alignItems: "center" }}
+        style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}
       >
         <h1>Contatti</h1>
 
@@ -121,24 +158,16 @@ export default async function ContactsPage({
       </div>
 
       <form
+        method="GET"
         className="row"
-        style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}
+        style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}
       >
         <input
-          className="input"
-          placeholder="Cerca nome / email / telefono"
           name="q"
+          className="input"
+          placeholder="Cerca nome / email / telefono / cliente / ruolo"
           defaultValue={q}
         />
-
-        <select name="role" className="input" defaultValue={role}>
-          <option value="">Ruolo</option>
-          {roles.map((r) => (
-            <option key={r.role} value={r.role}>
-              {r.role}
-            </option>
-          ))}
-        </select>
 
         <select
           name="marketingList"
@@ -146,41 +175,26 @@ export default async function ContactsPage({
           defaultValue={marketingList}
         >
           <option value="">Lista marketing</option>
-          {marketingLists
-            .filter((m) => m.marketingList)
-            .map((m) => (
-              <option key={m.marketingList ?? "ALTRO"} value={m.marketingList ?? ""}>
-                {m.marketingList}
-              </option>
-            ))}
-        </select>
-
-        <select name="type" className="input" defaultValue={type}>
-          <option value="">Tipo struttura</option>
-          {types.map((t) => (
-            <option key={t.type} value={t.type}>
-              {t.type}
+          {uniqueLists.map((m) => (
+            <option key={m} value={m}>
+              {m}
             </option>
           ))}
         </select>
 
-        <select name="service" className="input" defaultValue={service}>
-          <option value="">Servizio</option>
-          {services.map((s) => (
-            <option key={s.name} value={s.name}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-
-        <button className="btn">Filtra</button>
+        <button className="btn" type="submit">
+          Cerca
+        </button>
 
         <Link href="/contacts" className="btn">
           Reset
         </Link>
       </form>
 
-      <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
+      <div
+        className="row"
+        style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}
+      >
         <a className="btn primary" href={exportUrl}>
           Export CSV
         </a>
@@ -190,51 +204,53 @@ export default async function ContactsPage({
         </a>
       </div>
 
-      {contacts.length ? (
-        <table className="table" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>Ruolo</th>
-              <th>Lista</th>
-              <th>Cliente</th>
-              <th>Email</th>
-              <th>Telefono</th>
-              <th>Apri cliente</th>
-            </tr>
-          </thead>
+      <table className="table" style={{ marginTop: 12 }}>
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>Ruolo</th>
+            <th>Liste</th>
+            <th>Cliente</th>
+            <th>Email</th>
+            <th>Telefono</th>
+            <th>Apri cliente</th>
+          </tr>
+        </thead>
 
-          <tbody>
-            {contacts.map((c) => (
+        <tbody>
+          {contacts.map((c: any) => {
+            const lists = splitMarketingLists(c?.marketingList).join(", ");
+
+            return (
               <tr key={c.id}>
                 <td>
-                  <b>{c.name}</b>
+                  <b>{c.name ?? "—"}</b>
                 </td>
-
-                <td className="muted">{c.role}</td>
-
-                <td className="muted">{(c as any).marketingList ?? "ALTRO"}</td>
-
-                <td>{c.client?.name}</td>
-
+                <td>{c.role ?? "ALTRO"}</td>
+                <td>{lists || "ALTRO"}</td>
+                <td>{c.client?.name ?? "—"}</td>
                 <td>{c.email ?? "—"}</td>
-
                 <td>{c.phone ?? "—"}</td>
-
                 <td>
-                  <Link className="btn" href={`/clients/${c.clientId}`}>
-                    Apri
-                  </Link>
+                  {c.clientId ? (
+                    <Link className="btn" href={`/clients/${c.clientId}`}>
+                      Apri
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <div className="muted" style={{ marginTop: 12 }}>
-          Nessun contatto trovato
-        </div>
-      )}
+            );
+          })}
+
+          {contacts.length === 0 ? (
+            <tr>
+              <td colSpan={7}>Nessun risultato</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
     </div>
   );
 }

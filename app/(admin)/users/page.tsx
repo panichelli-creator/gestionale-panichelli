@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { createOrUpdateUser, listUsers } from "@/app/actions/users";
 import DeleteUserButton from "./DeleteUserButton";
 import { IconPlus, IconUsers } from "@/app/ui/icons";
 
@@ -36,8 +35,144 @@ function roleDotStyle(role: string) {
   };
 }
 
+function isStrongPassword(password: string) {
+  if (password.length < 12) return false;
+  if (!/[a-z]/.test(password)) return false;
+  if (!/[A-Z]/.test(password)) return false;
+  if (!/[0-9]/.test(password)) return false;
+  if (!/[^A-Za-z0-9]/.test(password)) return false;
+  return true;
+}
+
 export default async function UsersPage() {
-  const users = await listUsers();
+  const { prisma } = await import("@/lib/prisma");
+
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: "desc" },
+  });
+
+  async function createOrUpdateUser(formData: FormData) {
+    "use server";
+
+    const { prisma } = await import("@/lib/prisma");
+    const { revalidatePath } = await import("next/cache");
+    const { hashPassword } = await import("@/lib/auth");
+
+    const username = String(formData.get("username") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "").trim();
+    const roleRaw = String(formData.get("role") ?? "staff").trim();
+    const name = String(formData.get("name") ?? "").trim() || null;
+
+    if (!username || !password || !isStrongPassword(password)) return;
+
+    let role: "admin" | "staff" | "ingegnere_clinico" = "staff";
+    if (roleRaw === "admin") role = "admin";
+    else if (roleRaw === "ingegnere_clinico") role = "ingegnere_clinico";
+
+    await prisma.user.upsert({
+      where: { email: username },
+      create: {
+        email: username,
+        password: hashPassword(password),
+        role,
+        name,
+      },
+      update: {
+        password: hashPassword(password),
+        role,
+        name,
+      },
+    });
+
+    revalidatePath("/users");
+  }
+
+  async function resetPasswordAction(formData: FormData) {
+    "use server";
+
+    const { prisma } = await import("@/lib/prisma");
+    const { revalidatePath } = await import("next/cache");
+    const { hashPassword } = await import("@/lib/auth");
+
+    const id = String(formData.get("id") ?? "").trim();
+    const password = String(formData.get("newPassword") ?? "").trim();
+
+    if (!id || !password || !isStrongPassword(password)) return;
+
+    await prisma.user.update({
+      where: { id },
+      data: {
+        password: hashPassword(password),
+      },
+    });
+
+    revalidatePath("/users");
+  }
+
+  async function updateRoleAction(formData: FormData) {
+    "use server";
+
+    const { prisma } = await import("@/lib/prisma");
+    const { revalidatePath } = await import("next/cache");
+
+    const id = String(formData.get("id") ?? "").trim();
+    const roleRaw = String(formData.get("role") ?? "").trim();
+
+    if (!id) return;
+
+    let role: "admin" | "staff" | "ingegnere_clinico" = "staff";
+    if (roleRaw === "admin") role = "admin";
+    else if (roleRaw === "ingegnere_clinico") role = "ingegnere_clinico";
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { role: true },
+    });
+
+    if (!user) return;
+
+    if (user.role === "admin" && role !== "admin") {
+      const admins = await prisma.user.count({
+        where: { role: "admin" },
+      });
+
+      if (admins <= 1) return;
+    }
+
+    await prisma.user.update({
+      where: { id },
+      data: { role },
+    });
+
+    revalidatePath("/users");
+  }
+
+  async function deleteUserAction(formData: FormData) {
+    "use server";
+
+    const { prisma } = await import("@/lib/prisma");
+    const { revalidatePath } = await import("next/cache");
+
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+
+    const admins = await prisma.user.count({
+      where: { role: "admin" },
+    });
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!user) return;
+    if (user.role === "admin" && admins <= 1) return;
+
+    await prisma.user.delete({
+      where: { id },
+    });
+
+    revalidatePath("/users");
+  }
 
   return (
     <div className="card">
@@ -91,11 +226,7 @@ export default async function UsersPage() {
           </div>
         </div>
 
-        <form
-          action={createOrUpdateUser}
-          className="card"
-          style={{ marginTop: 12 }}
-        >
+        <form action={createOrUpdateUser} className="card" style={{ marginTop: 12 }}>
           <div
             style={{
               display: "grid",
@@ -110,7 +241,7 @@ export default async function UsersPage() {
 
             <div style={{ display: "grid", gap: 8 }}>
               <label>Password</label>
-              <input className="input" name="password" type="password" required />
+              <input className="input" name="password" type="password" required minLength={12} />
             </div>
 
             <div style={{ display: "grid", gap: 8 }}>
@@ -129,6 +260,10 @@ export default async function UsersPage() {
           </div>
 
           <div className="muted" style={{ marginTop: 12 }}>
+            Password minima: <b>12 caratteri</b> con maiuscola, minuscola, numero e simbolo.
+          </div>
+
+          <div className="muted" style={{ marginTop: 6 }}>
             L’utente <b>Ingegnere Clinico</b> potrà accedere solo alla sezione di Ingegneria Clinica.
           </div>
 
@@ -166,7 +301,8 @@ export default async function UsersPage() {
               <th>Nome</th>
               <th>Ruolo</th>
               <th>Creato</th>
-              <th style={{ width: 140 }}>Azioni</th>
+              <th>Password</th>
+              <th style={{ width: 160 }}>Azioni</th>
             </tr>
           </thead>
           <tbody>
@@ -177,29 +313,61 @@ export default async function UsersPage() {
                 </td>
                 <td>{u.name ?? "-"}</td>
                 <td>
-                  <span
-                    className="muted"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
+                  <form action={updateRoleAction} className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <input type="hidden" name="id" value={u.id} />
                     <span
+                      className="muted"
                       style={{
-                        display: "inline-block",
-                        width: 8,
-                        height: 8,
-                        borderRadius: 999,
-                        ...roleDotStyle(u.role),
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
                       }}
-                    />
-                    {roleLabel(u.role)}
-                  </span>
+                    >
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: 8,
+                          height: 8,
+                          borderRadius: 999,
+                          ...roleDotStyle(u.role),
+                        }}
+                      />
+                    </span>
+                    <select
+                      name="role"
+                      className="input"
+                      defaultValue={u.role}
+                      style={{ minWidth: 190 }}
+                    >
+                      <option value="staff">Collaboratore (staff)</option>
+                      <option value="ingegnere_clinico">Ingegnere Clinico</option>
+                      <option value="admin">Socio (admin)</option>
+                    </select>
+                    <button className="btn" type="submit">
+                      Salva
+                    </button>
+                  </form>
                 </td>
                 <td>{new Date(u.createdAt).toLocaleString("it-IT")}</td>
                 <td>
-                  <DeleteUserButton id={u.id} username={u.email} />
+                  <form action={resetPasswordAction} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <input type="hidden" name="id" value={u.id} />
+                    <input
+                      className="input"
+                      name="newPassword"
+                      type="password"
+                      placeholder="Nuova password"
+                      minLength={12}
+                      style={{ minWidth: 190 }}
+                      required
+                    />
+                    <button className="btn" type="submit">
+                      Reset
+                    </button>
+                  </form>
+                </td>
+                <td>
+                  <DeleteUserButton id={u.id} username={u.email} action={deleteUserAction} />
                 </td>
               </tr>
             ))}
@@ -207,7 +375,7 @@ export default async function UsersPage() {
         </table>
 
         <div className="muted" style={{ marginTop: 8 }}>
-          Nota: non puoi eliminare l’ultimo utente admin.
+          Nota: non puoi eliminare o declassare l’ultimo utente admin.
         </div>
       </div>
     </div>

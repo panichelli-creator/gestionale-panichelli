@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -9,14 +8,6 @@ const ECON_START = "--- ECONOMICA_JSON ---";
 const ECON_END = "--- FINE ECONOMICA_JSON ---";
 const ECON_B64_PREFIX = "[[ECON_B64:";
 const ECON_B64_SUFFIX = "]]";
-
-type PaymentRow = {
-  label: string;
-  amount: number;
-  paidAt: Date | null;
-  paidYear: number | null;
-  notes: string;
-};
 
 type EconomicPayload = {
   costoPraticaEur: number | null;
@@ -41,6 +32,12 @@ function fmtIso(d: Date | null) {
   return d ? new Date(d).toISOString().slice(0, 10) : "";
 }
 
+function fmtMoneyInput(v: any) {
+  if (v == null || v === "") return "";
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) && n !== 0 ? String(n).replace(".", ",") : "";
+}
+
 function isConcluso(v: string | null | undefined) {
   return String(v ?? "").trim().toUpperCase() === "CONCLUSO";
 }
@@ -61,32 +58,6 @@ function toNum(v: any) {
   if (v == null || v === "") return 0;
   const n = Number(String(v).replace(",", "."));
   return Number.isFinite(n) ? n : 0;
-}
-
-function fmtMoneyInput(v: any) {
-  if (v == null || v === "") return "";
-  const n = toNum(v);
-  return n ? String(n).replace(".", ",") : "";
-}
-
-function parseMaybeDate(v: any): Date | null {
-  if (!v) return null;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function parseMaybeArray(v: any): any[] {
-  if (!v) return [];
-  if (Array.isArray(v)) return v;
-  if (typeof v === "string") {
-    try {
-      const parsed = JSON.parse(v);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
 }
 
 function normalizeEconomicPayload(raw: any): EconomicPayload | null {
@@ -168,9 +139,7 @@ function splitNotesAndEconomic(rawNotes: string | null | undefined) {
 
   if (b64Start !== -1 && b64End !== -1 && b64End > b64Start) {
     const cleanNotes = text.slice(0, b64Start).trim();
-    const encoded = text
-      .slice(b64Start + ECON_B64_PREFIX.length, b64End)
-      .trim();
+    const encoded = text.slice(b64Start + ECON_B64_PREFIX.length, b64End).trim();
 
     try {
       const decoded = Buffer.from(encoded, "base64").toString("utf8");
@@ -214,7 +183,7 @@ function splitNotesAndEconomic(rawNotes: string | null | undefined) {
   }
 }
 
-function buildNotesWithEconomic(notes: string | null, economic: EconomicPayload) {
+function buildNotesWithEconomic(notes: string | null, economic: EconomicPayload | null) {
   const clean = String(notes ?? "").trim();
 
   if (!hasEconomicData(economic)) {
@@ -228,174 +197,6 @@ function buildNotesWithEconomic(notes: string | null, economic: EconomicPayload)
   return clean ? `${clean}\n\n${token}` : token;
 }
 
-function getPracticeTotal(p: any, econ: EconomicPayload | null) {
-  const candidates = [
-    p?.costoPraticaEur,
-    p?.practiceAmountEur,
-    p?.totalAmountEur,
-    p?.priceEur,
-    p?.totalEur,
-    p?.amountEur,
-    p?.clientPriceEur,
-    p?.valueEur,
-    p?.price,
-    p?.total,
-    p?.amount,
-    econ?.costoPraticaEur,
-  ];
-
-  for (const v of candidates) {
-    const n = toNum(v);
-    if (n !== 0) return n;
-  }
-
-  return 0;
-}
-
-function extractPaymentRows(p: any, econ: EconomicPayload | null): PaymentRow[] {
-  const rows: PaymentRow[] = [];
-
-  const arrayCandidates = [
-    ...parseMaybeArray(p?.payments),
-    ...parseMaybeArray(p?.paymentRows),
-    ...parseMaybeArray(p?.paymentSteps),
-    ...parseMaybeArray(p?.incassi),
-    ...parseMaybeArray(p?.rate),
-    ...(econ?.paymentRows ?? []),
-  ];
-
-  for (let i = 0; i < arrayCandidates.length; i++) {
-    const item = arrayCandidates[i] ?? {};
-
-    const amount = toNum(
-      item.amountEur ??
-        item.importoEur ??
-        item.amount ??
-        item.importo ??
-        item.priceEur ??
-        item.valueEur
-    );
-
-    const paidAt =
-      parseMaybeDate(item.paidAt) ??
-      parseMaybeDate(item.paymentDate) ??
-      parseMaybeDate(item.date) ??
-      parseMaybeDate(item.dataPagamento);
-
-    const rawYear =
-      item.paidYear ??
-      item.year ??
-      item.anno ??
-      (paidAt ? paidAt.getFullYear() : null);
-
-    const paidYear =
-      rawYear == null || rawYear === ""
-        ? null
-        : Number.isFinite(Number(rawYear))
-        ? Number(rawYear)
-        : null;
-
-    const label =
-      String(
-        item.label ??
-          item.name ??
-          item.type ??
-          item.tipo ??
-          item.description ??
-          ""
-      ).trim() || `Pagamento ${i + 1}`;
-
-    const notes = String(item.notes ?? item.note ?? "").trim();
-
-    if (amount > 0 || paidAt || notes) {
-      rows.push({
-        label,
-        amount,
-        paidAt,
-        paidYear,
-        notes,
-      });
-    }
-  }
-
-  const accontoAmount = toNum(
-    p?.accontoEur ??
-      p?.acceptanceAmountEur ??
-      p?.downPaymentEur ??
-      p?.depositEur ??
-      econ?.accontoEur
-  );
-  const accontoDate =
-    parseMaybeDate(p?.accontoDate) ??
-    parseMaybeDate(p?.acceptanceDate) ??
-    parseMaybeDate(p?.downPaymentDate) ??
-    parseMaybeDate(econ?.accontoDate);
-  const accontoYearRaw =
-    p?.accontoYear ??
-    p?.acceptanceYear ??
-    p?.downPaymentYear ??
-    econ?.accontoYear ??
-    (accontoDate ? accontoDate.getFullYear() : null);
-  const accontoYear =
-    accontoYearRaw == null || accontoYearRaw === ""
-      ? null
-      : Number.isFinite(Number(accontoYearRaw))
-      ? Number(accontoYearRaw)
-      : null;
-  const accontoNotes = String(p?.accontoNotes ?? econ?.accontoNotes ?? "").trim();
-
-  if (accontoAmount > 0 || accontoDate || accontoNotes) {
-    rows.push({
-      label: "Acconto",
-      amount: accontoAmount,
-      paidAt: accontoDate,
-      paidYear: accontoYear,
-      notes: accontoNotes,
-    });
-  }
-
-  const saldoAmount = toNum(
-    p?.saldoEur ??
-      p?.balanceEur ??
-      p?.finalAmountEur ??
-      econ?.saldoEur
-  );
-  const saldoDate =
-    parseMaybeDate(p?.saldoDate) ??
-    parseMaybeDate(p?.balanceDate) ??
-    parseMaybeDate(p?.finalPaymentDate) ??
-    parseMaybeDate(econ?.saldoDate);
-  const saldoYearRaw =
-    p?.saldoYear ??
-    p?.balanceYear ??
-    p?.finalPaymentYear ??
-    econ?.saldoYear ??
-    (saldoDate ? saldoDate.getFullYear() : null);
-  const saldoYear =
-    saldoYearRaw == null || saldoYearRaw === ""
-      ? null
-      : Number.isFinite(Number(saldoYearRaw))
-      ? Number(saldoYearRaw)
-      : null;
-  const saldoNotes = String(p?.saldoNotes ?? econ?.saldoNotes ?? "").trim();
-
-  if (saldoAmount > 0 || saldoDate || saldoNotes) {
-    rows.push({
-      label: "Saldo",
-      amount: saldoAmount,
-      paidAt: saldoDate,
-      paidYear: saldoYear,
-      notes: saldoNotes,
-    });
-  }
-
-  return rows.sort((a, b) => {
-    const at = a.paidAt ? a.paidAt.getTime() : Number.MAX_SAFE_INTEGER;
-    const bt = b.paidAt ? b.paidAt.getTime() : Number.MAX_SAFE_INTEGER;
-    return at - bt;
-  });
-}
-
 export default async function EditPracticePage({
   params,
 }: {
@@ -404,7 +205,12 @@ export default async function EditPracticePage({
   const { prisma } = await import("@/lib/prisma");
   const p = await prisma.clientPractice.findUnique({
     where: { id: params.practiceId },
-    include: { client: true },
+    include: {
+      client: true,
+      billingSteps: {
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      },
+    },
   });
 
   if (!p) return notFound();
@@ -417,18 +223,12 @@ export default async function EditPracticePage({
   const notesParts = splitNotesAndEconomic(p.notes);
   const econ = notesParts.economic;
 
-  const currentPayments = extractPaymentRows(row, econ);
-  const extraPayments = currentPayments.filter(
-    (x) => x.label.toUpperCase() !== "ACCONTO" && x.label.toUpperCase() !== "SALDO"
-  );
-
-  const accontoRow =
-    currentPayments.find((x) => x.label.toUpperCase() === "ACCONTO") ?? null;
-  const saldoRow =
-    currentPayments.find((x) => x.label.toUpperCase() === "SALDO") ?? null;
+  const billingSteps = Array.isArray(row.billingSteps) ? row.billingSteps : [];
 
   async function updatePractice(formData: FormData) {
     "use server";
+
+    const { prisma } = await import("@/lib/prisma");
 
     const clientId = params.id;
     const practiceId = params.practiceId;
@@ -442,83 +242,96 @@ export default async function EditPracticePage({
     const startYearRaw = String(formData.get("startYear") ?? "").trim();
     const startYear = startYearRaw ? Number(startYearRaw) : null;
     const notes = String(formData.get("notes") ?? "").trim() || null;
+    const fatturata = String(formData.get("fatturata") ?? "").trim() === "on";
 
     if (!title) {
       redirect(`/clients/${clientId}/practices/${practiceId}/edit`);
     }
 
-    const costoPraticaRaw = String(formData.get("costoPraticaEur") ?? "").trim();
-    const accontoEurRaw = String(formData.get("accontoEur") ?? "").trim();
-    const accontoDateRaw = String(formData.get("accontoDate") ?? "").trim();
-    const accontoYearRaw = String(formData.get("accontoYear") ?? "").trim();
-    const accontoNotesRaw = String(formData.get("accontoNotes") ?? "").trim();
+    const stepIds = formData.getAll("billingStepId").map((v) => String(v ?? "").trim());
+    const stepSortOrders = formData.getAll("billingStepSortOrder").map((v) => String(v ?? "").trim());
+    const stepLabels = formData.getAll("billingStepLabel").map((v) => String(v ?? "").trim());
+    const stepTypes = formData.getAll("billingStepType").map((v) => String(v ?? "").trim().toUpperCase());
+    const stepTriggers = formData.getAll("billingStepTriggerStatus").map((v) => String(v ?? "").trim().toUpperCase());
+    const stepAmounts = formData.getAll("billingStepAmountEur").map((v) => String(v ?? "").trim());
+    const stepStatuses = formData.getAll("billingStepStatus").map((v) => String(v ?? "").trim().toUpperCase());
+    const stepInvoiceNumbers = formData.getAll("billingStepInvoiceNumber").map((v) => String(v ?? "").trim());
+    const stepInvoiceDates = formData.getAll("billingStepInvoiceDate").map((v) => String(v ?? "").trim());
+    const stepPaidAts = formData.getAll("billingStepPaidAt").map((v) => String(v ?? "").trim());
+    const stepNotes = formData.getAll("billingStepNotes").map((v) => String(v ?? "").trim());
 
-    const saldoEurRaw = String(formData.get("saldoEur") ?? "").trim();
-    const saldoDateRaw = String(formData.get("saldoDate") ?? "").trim();
-    const saldoYearRaw = String(formData.get("saldoYear") ?? "").trim();
-    const saldoNotesRaw = String(formData.get("saldoNotes") ?? "").trim();
+    const existingStepIds = new Set(
+      (Array.isArray(row.billingSteps) ? row.billingSteps : []).map((x: any) => String(x.id))
+    );
 
-    const labels = formData.getAll("paymentLabel").map((v) => String(v ?? "").trim());
-    const amounts = formData.getAll("paymentAmount").map((v) => String(v ?? "").trim());
-    const dates = formData.getAll("paymentDate").map((v) => String(v ?? "").trim());
-    const years = formData.getAll("paymentYear").map((v) => String(v ?? "").trim());
-    const notesRows = formData.getAll("paymentNotes").map((v) => String(v ?? "").trim());
+    const incomingUsedIds = new Set<string>();
+    const billingStepRows = [];
 
-    const paymentRows = labels
-      .map((label, i) => {
-        const amount = toNum(amounts[i]);
-        const paymentDate = dates[i] ? new Date(`${dates[i]}T12:00:00`) : null;
-        const paymentYear =
-          years[i] && Number.isFinite(Number(years[i]))
-            ? Number(years[i])
-            : paymentDate
-            ? paymentDate.getFullYear()
-            : null;
-        const paymentNotes = notesRows[i] ?? "";
+    for (let i = 0; i < stepLabels.length; i++) {
+      const id = stepIds[i] || "";
+      const label = stepLabels[i] || "";
+      const billingType = stepTypes[i] || "ALTRO";
+      const triggerStatus = stepTriggers[i] || null;
+      const amountEurStep = toNum(stepAmounts[i]);
+      const billingStatus = stepStatuses[i] || "DA_FATTURARE";
+      const invoiceNumber = stepInvoiceNumbers[i] || null;
+      const invoiceDateInput = stepInvoiceDates[i] ? new Date(`${stepInvoiceDates[i]}T12:00:00`) : null;
+      const paidAtInput = stepPaidAts[i] ? new Date(`${stepPaidAts[i]}T12:00:00`) : null;
+      const note = stepNotes[i] || null;
+      const sortOrderRaw = stepSortOrders[i];
+      const sortOrder =
+        sortOrderRaw && Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : i + 1;
 
-        if (!label && !amount && !paymentDate && !paymentNotes) return null;
+      const isBlank =
+        !label &&
+        !amountEurStep &&
+        !triggerStatus &&
+        !invoiceNumber &&
+        !invoiceDateInput &&
+        !paidAtInput &&
+        !note;
 
-        return {
-          label: label || `Pagamento ${i + 1}`,
-          amountEur: amount,
-          paidAt: paymentDate ? paymentDate.toISOString() : null,
-          paidYear: paymentYear,
-          notes: paymentNotes || null,
-        };
-      })
-      .filter(Boolean) as EconomicPayload["paymentRows"];
+      if (isBlank) continue;
 
-    const costoPraticaEur = costoPraticaRaw ? toNum(costoPraticaRaw) : null;
-    const accontoEur = accontoEurRaw ? toNum(accontoEurRaw) : null;
-    const accontoDate = accontoDateRaw ? new Date(`${accontoDateRaw}T12:00:00`) : null;
-    const accontoYear =
-      accontoYearRaw && Number.isFinite(Number(accontoYearRaw))
-        ? Number(accontoYearRaw)
-        : accontoDate
-        ? accontoDate.getFullYear()
-        : null;
+      if (id) incomingUsedIds.add(id);
 
-    const saldoEur = saldoEurRaw ? toNum(saldoEurRaw) : null;
-    const saldoDate = saldoDateRaw ? new Date(`${saldoDateRaw}T12:00:00`) : null;
-    const saldoYear =
-      saldoYearRaw && Number.isFinite(Number(saldoYearRaw))
-        ? Number(saldoYearRaw)
-        : saldoDate
-        ? saldoDate.getFullYear()
-        : null;
+      let nextBillingStatus = billingStatus;
+      if (
+        nextBillingStatus === "DA_FATTURARE" &&
+        triggerStatus &&
+        triggerStatus === apertureStatus
+      ) {
+        nextBillingStatus = "FATTURA_DA_INVIARE";
+      }
 
-    const economicPayload: EconomicPayload = {
-      costoPraticaEur,
-      accontoEur,
-      accontoDate: accontoDate ? accontoDate.toISOString() : null,
-      accontoYear,
-      accontoNotes: accontoNotesRaw || null,
-      saldoEur,
-      saldoDate: saldoDate ? saldoDate.toISOString() : null,
-      saldoYear,
-      saldoNotes: saldoNotesRaw || null,
-      paymentRows,
-    };
+      let invoiceDate = invoiceDateInput;
+      let paidAt = paidAtInput;
+
+      if (nextBillingStatus === "FATTURATA" && !invoiceDate) {
+        invoiceDate = new Date();
+      }
+
+      if (nextBillingStatus === "INCASSATA") {
+        if (!invoiceDate) invoiceDate = new Date();
+        if (!paidAt) paidAt = new Date();
+      }
+
+      billingStepRows.push({
+        id: id || null,
+        sortOrder,
+        label: label || `Voce ${i + 1}`,
+        billingType: billingType || "ALTRO",
+        triggerStatus,
+        amountEur: amountEurStep,
+        billingStatus: nextBillingStatus,
+        invoiceNumber,
+        invoiceDate,
+        paidAt,
+        notes: note,
+      });
+    }
+
+    const deleteIds = Array.from(existingStepIds).filter((id) => !incomingUsedIds.has(id));
 
     await prisma.clientPractice.update({
       where: { id: practiceId },
@@ -529,9 +342,56 @@ export default async function EditPracticePage({
         inApertureList,
         apertureStatus,
         startYear,
-        notes: buildNotesWithEconomic(notes, economicPayload),
+        fatturata,
+        fatturataAt: fatturata ? p.fatturataAt ?? new Date() : null,
+        notes: buildNotesWithEconomic(notes, econ),
       },
     });
+
+    if (deleteIds.length) {
+      await prisma.practiceBillingStep.deleteMany({
+        where: {
+          id: { in: deleteIds },
+          practiceId,
+        },
+      });
+    }
+
+    for (const step of billingStepRows) {
+      if (step.id) {
+        await prisma.practiceBillingStep.update({
+          where: { id: step.id },
+          data: {
+            sortOrder: step.sortOrder,
+            label: step.label,
+            billingType: step.billingType,
+            triggerStatus: step.triggerStatus,
+            amountEur: step.amountEur,
+            billingStatus: step.billingStatus,
+            invoiceNumber: step.invoiceNumber,
+            invoiceDate: step.invoiceDate,
+            paidAt: step.paidAt,
+            notes: step.notes,
+          },
+        });
+      } else {
+        await prisma.practiceBillingStep.create({
+          data: {
+            practiceId,
+            sortOrder: step.sortOrder,
+            label: step.label,
+            billingType: step.billingType,
+            triggerStatus: step.triggerStatus,
+            amountEur: step.amountEur,
+            billingStatus: step.billingStatus,
+            invoiceNumber: step.invoiceNumber,
+            invoiceDate: step.invoiceDate,
+            paidAt: step.paidAt,
+            notes: step.notes,
+          },
+        });
+      }
+    }
 
     redirect(`/clients/${clientId}/practices/${practiceId}`);
   }
@@ -633,177 +493,157 @@ export default async function EditPracticePage({
           </label>
         </div>
 
-        <div className="card" style={{ marginTop: 12 }}>
-          <h2 style={{ marginBottom: 10 }}>Parte economica</h2>
+        <div className="card" style={{ marginTop: 12, padding: 12 }}>
+          <label style={{ display: "flex", gap: 10 }}>
+            <input
+              type="checkbox"
+              name="fatturata"
+              defaultChecked={Boolean(row.fatturata)}
+            />
+            <b>Pratica fatturata</b>
+          </label>
 
-          <div className="grid2">
-            <div>
-              <label>Costo pratica (€)</label>
-              <input
-                className="input"
-                name="costoPraticaEur"
-                defaultValue={fmtMoneyInput(getPracticeTotal(row, econ))}
-                placeholder="Es. 2500"
-              />
-            </div>
-            <div className="muted" style={{ marginTop: 28 }}>
-              I dati economici vengono salvati in formato compatto e non devono più comparire come JSON nelle note.
-            </div>
-          </div>
-
-          <div className="grid2" style={{ marginTop: 12 }}>
-            <div>
-              <label>Acconto (€)</label>
-              <input
-                className="input"
-                name="accontoEur"
-                defaultValue={fmtMoneyInput(accontoRow?.amount ?? econ?.accontoEur)}
-                placeholder="Es. 500"
-              />
-            </div>
-            <div>
-              <label>Data acconto</label>
-              <input
-                className="input"
-                type="date"
-                name="accontoDate"
-                defaultValue={fmtIso(accontoRow?.paidAt ?? parseMaybeDate(econ?.accontoDate))}
-              />
-            </div>
-          </div>
-
-          <div className="grid2" style={{ marginTop: 12 }}>
-            <div>
-              <label>Anno acconto</label>
-              <input
-                className="input"
-                type="number"
-                name="accontoYear"
-                defaultValue={accontoRow?.paidYear ?? econ?.accontoYear ?? ""}
-                placeholder="Es. 2026"
-              />
-            </div>
-            <div>
-              <label>Note acconto</label>
-              <input
-                className="input"
-                name="accontoNotes"
-                defaultValue={accontoRow?.notes ?? econ?.accontoNotes ?? ""}
-              />
-            </div>
-          </div>
-
-          <div className="grid2" style={{ marginTop: 12 }}>
-            <div>
-              <label>Saldo (€)</label>
-              <input
-                className="input"
-                name="saldoEur"
-                defaultValue={fmtMoneyInput(saldoRow?.amount ?? econ?.saldoEur)}
-                placeholder="Es. 2000"
-              />
-            </div>
-            <div>
-              <label>Data saldo</label>
-              <input
-                className="input"
-                type="date"
-                name="saldoDate"
-                defaultValue={fmtIso(saldoRow?.paidAt ?? parseMaybeDate(econ?.saldoDate))}
-              />
-            </div>
-          </div>
-
-          <div className="grid2" style={{ marginTop: 12 }}>
-            <div>
-              <label>Anno saldo</label>
-              <input
-                className="input"
-                type="number"
-                name="saldoYear"
-                defaultValue={saldoRow?.paidYear ?? econ?.saldoYear ?? ""}
-                placeholder="Es. 2027"
-              />
-            </div>
-            <div>
-              <label>Note saldo</label>
-              <input
-                className="input"
-                name="saldoNotes"
-                defaultValue={saldoRow?.notes ?? econ?.saldoNotes ?? ""}
-              />
-            </div>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Se attiva, entra nel fatturato reale pratiche.
           </div>
         </div>
 
         <div className="card" style={{ marginTop: 12 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-            <h2 style={{ margin: 0 }}>Pagamenti intermedi / rate</h2>
-            <div className="muted">Compila solo le righe che ti servono</div>
+            <h2 style={{ margin: 0 }}>Piano fatturazione / SAL</h2>
+            <div className="muted">
+              Quando lo stato pratica coincide col trigger, la voce passa a “Fattura da inviare”
+            </div>
           </div>
 
-          {Array.from({ length: 5 }).map((_, i) => {
-            const current = extraPayments[i];
+          {Array.from({ length: Math.max(billingSteps.length, 6) }).map((_, i) => {
+            const current = billingSteps[i];
 
             return (
               <div
-                key={i}
+                key={current?.id ?? `new-${i}`}
                 style={{
                   marginTop: 12,
                   paddingTop: 12,
                   borderTop: i === 0 ? "none" : "1px solid rgba(0,0,0,0.08)",
                 }}
               >
+                <input type="hidden" name="billingStepId" value={current?.id ?? ""} />
+                <input
+                  type="hidden"
+                  name="billingStepSortOrder"
+                  value={String(current?.sortOrder ?? i + 1)}
+                />
+
                 <div className="grid2">
                   <div>
-                    <label>Voce pagamento {i + 1}</label>
+                    <label>Voce SAL {i + 1}</label>
                     <input
                       className="input"
-                      name="paymentLabel"
+                      name="billingStepLabel"
                       defaultValue={current?.label ?? ""}
-                      placeholder="Es. Secondo acconto / SAL / Integrazione"
+                      placeholder="Es. Accettazione / Primo acconto / SAL 1 / Saldo"
                     />
                   </div>
 
                   <div>
+                    <label>Tipo</label>
+                    <select
+                      className="input"
+                      name="billingStepType"
+                      defaultValue={current?.billingType ?? "ALTRO"}
+                    >
+                      <option value="ACCETTAZIONE">Accettazione</option>
+                      <option value="PRIMO_ACCONTO">Primo acconto</option>
+                      <option value="SECONDO_ACCONTO">Secondo acconto</option>
+                      <option value="SALDO">Saldo</option>
+                      <option value="ALTRO">Altro</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid2" style={{ marginTop: 12 }}>
+                  <div>
                     <label>Importo (€)</label>
                     <input
                       className="input"
-                      name="paymentAmount"
-                      defaultValue={fmtMoneyInput(current?.amount)}
-                      placeholder="Es. 350"
+                      name="billingStepAmountEur"
+                      defaultValue={fmtMoneyInput(current?.amountEur)}
+                      placeholder="Es. 500"
+                    />
+                  </div>
+
+                  <div>
+                    <label>Trigger stato pratica</label>
+                    <select
+                      className="input"
+                      name="billingStepTriggerStatus"
+                      defaultValue={current?.triggerStatus ?? ""}
+                    >
+                      <option value="">Nessuno</option>
+                      <option value="IN_ATTESA">In attesa</option>
+                      <option value="INVIATA_REGIONE">Inviata Regione</option>
+                      <option value="INIZIO_LAVORI">Inizio lavori</option>
+                      <option value="ACCETTATO">Accettato</option>
+                      <option value="ISPEZIONE_ASL">Ispezione ASL</option>
+                      <option value="CONCLUSO">Concluso</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid2" style={{ marginTop: 12 }}>
+                  <div>
+                    <label>Stato fattura</label>
+                    <select
+                      className="input"
+                      name="billingStepStatus"
+                      defaultValue={current?.billingStatus ?? "DA_FATTURARE"}
+                    >
+                      <option value="DA_FATTURARE">Da fatturare</option>
+                      <option value="FATTURA_DA_INVIARE">Fattura da inviare</option>
+                      <option value="FATTURATA">Fatturata</option>
+                      <option value="INCASSATA">Incassata</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label>N. fattura</label>
+                    <input
+                      className="input"
+                      name="billingStepInvoiceNumber"
+                      defaultValue={current?.invoiceNumber ?? ""}
+                      placeholder="Es. 45/2026"
                     />
                   </div>
                 </div>
 
                 <div className="grid2" style={{ marginTop: 12 }}>
                   <div>
-                    <label>Data pagamento</label>
+                    <label>Data fattura</label>
                     <input
                       className="input"
                       type="date"
-                      name="paymentDate"
-                      defaultValue={fmtIso(current?.paidAt ?? null)}
+                      name="billingStepInvoiceDate"
+                      defaultValue={fmtIso(current?.invoiceDate ?? null)}
                     />
                   </div>
 
                   <div>
-                    <label>Anno pagamento</label>
+                    <label>Data incasso</label>
                     <input
                       className="input"
-                      type="number"
-                      name="paymentYear"
-                      defaultValue={current?.paidYear ?? ""}
-                      placeholder="Es. 2026"
+                      type="date"
+                      name="billingStepPaidAt"
+                      defaultValue={fmtIso(current?.paidAt ?? null)}
                     />
                   </div>
                 </div>
 
                 <div style={{ marginTop: 12 }}>
-                  <label>Note pagamento</label>
+                  <label>Note SAL</label>
                   <input
                     className="input"
-                    name="paymentNotes"
+                    name="billingStepNotes"
                     defaultValue={current?.notes ?? ""}
                     placeholder="Facoltative"
                   />

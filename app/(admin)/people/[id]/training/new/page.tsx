@@ -1,9 +1,20 @@
 import Link from "next/link";
-
 import { redirect } from "next/navigation";
+
+import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const STATI = ["DA_FARE", "SVOLTO", "IN_CORSO", "SOSPESO"] as const;
+const PRIORITA = ["BASSA", "MEDIA", "ALTA"] as const;
+
+const PERIODICITA = [
+  { value: "ANNUALE", years: 1 },
+  { value: "BIENNALE", years: 2 },
+  { value: "TRIENNALE", years: 3 },
+  { value: "QUINQUENNALE", years: 5 },
+] as const;
 
 function startOfTodayLocal() {
   const d = new Date();
@@ -43,6 +54,7 @@ export default async function NewPersonTrainingPage({
   searchParams?: SP;
 }) {
   const { prisma } = await import("@/lib/prisma");
+
   const person = await prisma.person.findUnique({
     where: { id: params.id },
     select: { id: true, firstName: true, lastName: true },
@@ -50,16 +62,27 @@ export default async function NewPersonTrainingPage({
 
   if (!person) redirect("/people");
 
-  const courses = await prisma.courseCatalog.findMany({
+  const coursesRaw = await prisma.courseCatalog.findMany({
     where: { isActive: true },
     orderBy: { name: "asc" },
+  });
+
+  const seen = new Set<string>();
+  const courses = coursesRaw.filter((c) => {
+    const key = (c.name ?? "").trim().toUpperCase();
+    if (!key) return false;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 
   const clientId = String(searchParams?.clientId ?? "").trim();
   const returnTo = String(searchParams?.returnTo ?? "").trim();
 
-  async function createTraining(formData: FormData) {
+  const createTraining = async (formData: FormData) => {
     "use server";
+
+    const { prisma } = await import("@/lib/prisma");
 
     const personId = String(formData.get("personId") ?? "").trim();
     const courseIdRaw = String(formData.get("courseId") ?? "").trim();
@@ -67,11 +90,18 @@ export default async function NewPersonTrainingPage({
 
     const performedAtRaw = String(formData.get("performedAt") ?? "").trim();
     const periodicity = String(formData.get("periodicity") ?? "ANNUALE").trim() || "ANNUALE";
+    const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
 
     const status = String(formData.get("status") ?? "SVOLTO").trim() || "SVOLTO";
     const priority = String(formData.get("priority") ?? "MEDIA").trim() || "MEDIA";
-    const certificateDelivered = String(formData.get("certificateDelivered") ?? "NO") === "SI";
-    const notes = String(formData.get("notes") ?? "").trim();
+    const certificateDelivered = formData.get("certificateDelivered") === "on";
+    const fatturata = formData.get("fatturata") === "on";
+    const fatturataAtRaw = String(formData.get("fatturataAt") ?? "").trim();
+    const priceRaw = String(formData.get("priceEur") ?? "").trim();
+    const notes = String(formData.get("notes") ?? "").trim() || null;
+
+    const alertMonthsRaw = String(formData.get("alertMonths") ?? "").trim();
+    const alertMonths2Raw = String(formData.get("alertMonths2") ?? "").trim();
 
     const returnToForm = String(formData.get("returnTo") ?? "").trim();
     const clientIdForm = String(formData.get("clientId") ?? "").trim();
@@ -121,8 +151,22 @@ export default async function NewPersonTrainingPage({
       redirect(buildRedirect(`/people/${params.id}/training/new`, "Seleziona un corso"));
     }
 
-    const performedAt = performedAtRaw ? new Date(performedAtRaw) : null;
-    const dueDate = calcDueDate(performedAt, periodicity);
+    const performedAt = performedAtRaw ? new Date(`${performedAtRaw}T12:00:00`) : null;
+
+    let dueDate = dueDateRaw ? new Date(`${dueDateRaw}T12:00:00`) : null;
+    if (status === "SVOLTO" && performedAt) {
+      dueDate = calcDueDate(performedAt, periodicity);
+    }
+
+    const fatturataAt = fatturata
+      ? fatturataAtRaw
+        ? new Date(`${fatturataAtRaw}T12:00:00`)
+        : new Date()
+      : null;
+
+    const alertMonths = alertMonthsRaw ? Number(alertMonthsRaw) : 2;
+    const alertMonths2 = alertMonths2Raw ? Number(alertMonths2Raw) : 3;
+    const priceEur = priceRaw ? new Prisma.Decimal(priceRaw.replace(",", ".")) : null;
 
     try {
       const existingRecord = await prisma.trainingRecord.findFirst({
@@ -130,7 +174,7 @@ export default async function NewPersonTrainingPage({
           personId,
           courseId,
         },
-        select: { id: true },
+        select: { id: true, fatturataAt: true },
       });
 
       if (existingRecord) {
@@ -141,8 +185,15 @@ export default async function NewPersonTrainingPage({
             dueDate,
             status,
             priority,
+            priceEur,
             certificateDelivered,
-            notes: notes || null,
+            fatturata,
+            fatturataAt: fatturata
+              ? fatturataAt ?? existingRecord.fatturataAt ?? new Date()
+              : null,
+            alertMonths,
+            alertMonths2,
+            notes,
           } as any,
         });
       } else {
@@ -154,8 +205,13 @@ export default async function NewPersonTrainingPage({
             dueDate,
             status,
             priority,
+            priceEur,
             certificateDelivered,
-            notes: notes || null,
+            fatturata,
+            fatturataAt,
+            alertMonths,
+            alertMonths2,
+            notes,
           } as any,
         });
       }
@@ -169,7 +225,7 @@ export default async function NewPersonTrainingPage({
     }
 
     redirect(returnToForm || buildRedirect(`/people/${params.id}`));
-  }
+  };
 
   const today = startOfTodayLocal();
   const todayIso = today.toISOString().slice(0, 10);
@@ -208,12 +264,82 @@ export default async function NewPersonTrainingPage({
         </div>
       ) : null}
 
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+(function(){
+  function addYearsISO(iso, years){
+    if(!iso) return "";
+    var d = new Date(iso + "T00:00:00");
+    if(isNaN(d.getTime())) return "";
+    var y = d.getFullYear() + years;
+    var m = d.getMonth();
+    var day = d.getDate();
+
+    var nd = new Date(Date.UTC(y, m, day));
+    if (nd.getUTCMonth() !== m) {
+      nd = new Date(Date.UTC(y, m + 1, 0));
+    }
+
+    var mm = String(nd.getUTCMonth() + 1).padStart(2, "0");
+    var dd = String(nd.getUTCDate()).padStart(2, "0");
+    return nd.getUTCFullYear() + "-" + mm + "-" + dd;
+  }
+
+  function recalc(){
+    var statusEl = document.querySelector('select[name="status"]');
+    var performedEl = document.querySelector('input[name="performedAt"]');
+    var dueEl = document.querySelector('input[name="dueDate"]');
+    var perEl = document.querySelector('select[name="periodicity"]');
+
+    if(!statusEl || !performedEl || !dueEl || !perEl) return;
+
+    var status = statusEl.value || "";
+    var performed = performedEl.value || "";
+    var per = perEl.value || "ANNUALE";
+
+    if(status !== "SVOLTO") return;
+    if(!performed) return;
+
+    var yearsMap = { ANNUALE:1, BIENNALE:2, TRIENNALE:3, QUINQUENNALE:5 };
+    var years = yearsMap[per] || 1;
+
+    var nextDue = addYearsISO(performed, years);
+    if(nextDue){
+      dueEl.value = nextDue;
+    }
+  }
+
+  document.addEventListener("change", function(e){
+    var t = e.target;
+    if(!t) return;
+    var name = t.getAttribute("name");
+    if(name === "status" || name === "performedAt" || name === "periodicity"){
+      recalc();
+    }
+  });
+
+  document.addEventListener("input", function(e){
+    var t = e.target;
+    if(!t) return;
+    var name = t.getAttribute("name");
+    if(name === "performedAt"){
+      recalc();
+    }
+  });
+
+  setTimeout(recalc, 0);
+})();
+          `,
+        }}
+      />
+
       <form action={createTraining} className="card" style={{ marginTop: 12 }}>
         <input type="hidden" name="personId" value={person.id} />
         <input type="hidden" name="clientId" value={clientId} />
         <input type="hidden" name="returnTo" value={returnTo} />
 
-        <div style={{ minWidth: 0 }}>
+        <div>
           <label>Corso</label>
           <select className="input" name="courseId" defaultValue="">
             <option value="" disabled>
@@ -239,77 +365,114 @@ export default async function NewPersonTrainingPage({
           />
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: 12,
-            marginTop: 12,
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <label>Data effettuazione</label>
-            <input className="input" type="date" name="performedAt" defaultValue={todayIso} />
+        <div className="grid4" style={{ marginTop: 12 }}>
+          <div>
+            <label>Data svolgimento</label>
+            <input
+              className="input"
+              type="date"
+              name="performedAt"
+              defaultValue={todayIso}
+            />
           </div>
 
-          <div style={{ minWidth: 0 }}>
-            <label>Periodicità</label>
-            <select className="input" name="periodicity" defaultValue="ANNUALE">
-              <option value="ANNUALE">ANNUALE</option>
-              <option value="BIENNALE">BIENNALE</option>
-              <option value="TRIENNALE">TRIENNALE</option>
-              <option value="QUINQUENNALE">QUINQUENNALE</option>
-            </select>
-          </div>
-
-          <div style={{ minWidth: 0 }}>
+          <div>
             <label>Stato</label>
             <select className="input" name="status" defaultValue="SVOLTO">
-              <option value="DA_FARE">DA_FARE</option>
-              <option value="IN_CORSO">IN_CORSO</option>
-              <option value="SVOLTO">SVOLTO</option>
-              <option value="SOSPESO">SOSPESO</option>
+              {STATI.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
+          </div>
+
+          <div>
+            <label>Periodicità</label>
+            <select className="input" name="periodicity" defaultValue="ANNUALE">
+              {PERIODICITA.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.value}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label>Scadenza</label>
+            <input
+              className="input"
+              type="date"
+              name="dueDate"
+              defaultValue=""
+            />
+            <div className="muted" style={{ marginTop: 6 }}>
+              Si aggiorna in automatico quando metti SVOLTO.
+            </div>
           </div>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: 12,
-            marginTop: 12,
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <label>Prossima scadenza</label>
-            <input className="input" type="date" value="" readOnly disabled />
-            <div className="muted" style={{ marginTop: 6 }}>
-              Viene calcolata automaticamente da data effettuazione + periodicità.
+        <div className="grid3" style={{ marginTop: 12 }}>
+          <div>
+            <label>Prezzo (€)</label>
+            <input className="input" name="priceEur" defaultValue="" />
+          </div>
+
+          <div>
+            <label>Priorità</label>
+            <select className="input" name="priority" defaultValue="MEDIA">
+              {PRIORITA.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label>Attestato consegnato</label>
+            <div className="row" style={{ gap: 10, marginTop: 8 }}>
+              <input type="checkbox" name="certificateDelivered" defaultChecked={false} />
+              <span className="muted">Sì</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid2" style={{ marginTop: 12 }}>
+          <div>
+            <label>Fatturata</label>
+            <div className="row" style={{ gap: 10, marginTop: 8 }}>
+              <input type="checkbox" name="fatturata" defaultChecked={false} />
+              <span className="muted">Sì</span>
             </div>
           </div>
 
-          <div style={{ minWidth: 0 }}>
-            <label>Priorità</label>
-            <select className="input" name="priority" defaultValue="MEDIA">
-              <option value="BASSA">BASSA</option>
-              <option value="MEDIA">MEDIA</option>
-              <option value="ALTA">ALTA</option>
-            </select>
-          </div>
-
-          <div style={{ minWidth: 0 }}>
-            <label>Attestato consegnato</label>
-            <select className="input" name="certificateDelivered" defaultValue="NO">
-              <option value="NO">NO</option>
-              <option value="SI">SI</option>
-            </select>
+          <div>
+            <label>Fatturata il</label>
+            <input
+              className="input"
+              type="date"
+              name="fatturataAt"
+              defaultValue=""
+            />
           </div>
         </div>
 
-        <div style={{ marginTop: 12, minWidth: 0 }}>
+        <div className="grid2" style={{ marginTop: 12 }}>
+          <div>
+            <label>Alert mesi 1</label>
+            <input className="input" type="number" name="alertMonths" min={0} defaultValue={2} />
+          </div>
+
+          <div>
+            <label>Alert mesi 2</label>
+            <input className="input" type="number" name="alertMonths2" min={0} defaultValue={3} />
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
           <label>Note</label>
-          <input className="input" name="notes" placeholder="Note (opzionale)" />
+          <textarea className="input" name="notes" rows={4} defaultValue="" />
         </div>
 
         <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>

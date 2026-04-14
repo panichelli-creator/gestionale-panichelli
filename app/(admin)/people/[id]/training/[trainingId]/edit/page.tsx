@@ -16,7 +16,7 @@ const PERIODICITA = [
   { value: "QUINQUENNALE", years: 5 },
 ] as const;
 
-function fmtDateInput(d: Date | null) {
+function fmtDateInput(d: Date | null | undefined) {
   return d ? new Date(d).toISOString().slice(0, 10) : "";
 }
 
@@ -57,6 +57,7 @@ export default async function EditTrainingForPerson({
   searchParams?: SP;
 }) {
   const { prisma } = await import("@/lib/prisma");
+
   const training = await prisma.trainingRecord.findUnique({
     where: { id: params.trainingId },
     include: {
@@ -68,7 +69,7 @@ export default async function EditTrainingForPerson({
   if (!training) return notFound();
   if (training.personId !== params.id) return notFound();
 
-  const clientId = String(searchParams?.clientId ?? "").trim();
+  const resolvedClientId = String(searchParams?.clientId ?? training.person.clientId ?? "").trim();
   const returnTo = String(searchParams?.returnTo ?? "").trim();
 
   const coursesRaw = await prisma.courseCatalog.findMany({
@@ -85,8 +86,10 @@ export default async function EditTrainingForPerson({
     return true;
   });
 
-  async function updateTraining(formData: FormData) {
+  const updateTraining = async (formData: FormData) => {
     "use server";
+
+    const { prisma } = await import("@/lib/prisma");
 
     const personId = params.id;
     const trainingId = params.trainingId;
@@ -109,7 +112,12 @@ export default async function EditTrainingForPerson({
 
     if (courseIdRaw === "__ALTRO__") {
       if (!courseNameAlt) {
-        redirect(buildRedirect(`/people/${personId}/training/${trainingId}/edit`, "Scrivi il nome del nuovo corso (ALTRO)"));
+        redirect(
+          buildRedirect(
+            `/people/${personId}/training/${trainingId}/edit`,
+            "Scrivi il nome del nuovo corso (ALTRO)"
+          )
+        );
       }
 
       const existingCourse = await prisma.courseCatalog.findFirst({
@@ -133,7 +141,9 @@ export default async function EditTrainingForPerson({
     }
 
     if (!courseId) {
-      redirect(buildRedirect(`/people/${personId}/training/${trainingId}/edit`, "Seleziona un corso"));
+      redirect(
+        buildRedirect(`/people/${personId}/training/${trainingId}/edit`, "Seleziona un corso")
+      );
     }
 
     const performedAtRaw = String(formData.get("performedAt") ?? "").trim();
@@ -146,6 +156,8 @@ export default async function EditTrainingForPerson({
     const notes = String(formData.get("notes") ?? "").trim() || null;
 
     const certificateDelivered = formData.get("certificateDelivered") === "on";
+    const fatturata = formData.get("fatturata") === "on";
+    const fatturataAtRaw = String(formData.get("fatturataAt") ?? "").trim();
 
     const alertMonthsRaw = String(formData.get("alertMonths") ?? "").trim();
     const alertMonths2Raw = String(formData.get("alertMonths2") ?? "").trim();
@@ -155,13 +167,19 @@ export default async function EditTrainingForPerson({
 
     const priceEur = priceRaw ? new Prisma.Decimal(priceRaw.replace(",", ".")) : null;
 
-    const performedAt = performedAtRaw ? new Date(performedAtRaw) : null;
-    let dueDate = dueDateRaw ? new Date(dueDateRaw) : null;
+    const performedAt = performedAtRaw ? new Date(`${performedAtRaw}T12:00:00`) : null;
+    let dueDate = dueDateRaw ? new Date(`${dueDateRaw}T12:00:00`) : null;
 
     if (status === "SVOLTO" && performedAt) {
       const years = PERIODICITA.find((p) => p.value === periodicity)?.years ?? 1;
       dueDate = addYearsSafe(performedAt, years);
     }
+
+    const fatturataAt = fatturata
+      ? fatturataAtRaw
+        ? new Date(`${fatturataAtRaw}T12:00:00`)
+        : training.fatturataAt ?? new Date()
+      : null;
 
     try {
       await prisma.trainingRecord.update({
@@ -175,6 +193,8 @@ export default async function EditTrainingForPerson({
           priceEur,
           notes,
           certificateDelivered,
+          fatturata,
+          fatturataAt,
           alertMonths,
           alertMonths2,
         } as any,
@@ -189,15 +209,12 @@ export default async function EditTrainingForPerson({
     }
 
     redirect(returnToForm || buildRedirect(`/people/${personId}`));
-  }
+  };
 
-  const defaultPeriodicity = inferPeriodicityFromDates(
-    training.performedAt,
-    training.dueDate
-  );
+  const defaultPeriodicity = inferPeriodicityFromDates(training.performedAt, training.dueDate);
 
   const qs = new URLSearchParams();
-  if (clientId) qs.set("clientId", clientId);
+  if (resolvedClientId) qs.set("clientId", resolvedClientId);
   if (returnTo) qs.set("returnTo", returnTo);
   const qsSuffix = qs.toString() ? `?${qs.toString()}` : "";
 
@@ -206,12 +223,23 @@ export default async function EditTrainingForPerson({
   const deleteHref = `/people/${params.id}/training/${params.trainingId}/delete${qsSuffix}`;
 
   return (
-    <div className="card">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-        <h1>Modifica corso</h1>
-        <Link className="btn" href={backHref}>
-          {returnTo ? "← Torna al cliente" : "← Torna alla persona"}
-        </Link>
+    <div className="card" style={{ maxWidth: 1180, margin: "0 auto" }}>
+      <div
+        className="row"
+        style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ margin: 0 }}>Modifica corso</h1>
+          <div className="muted" style={{ marginTop: 6 }}>
+            {training.person.lastName} {training.person.firstName}
+          </div>
+        </div>
+
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <Link className="btn" href={backHref}>
+            {returnTo ? "← Torna al cliente" : "← Torna alla persona"}
+          </Link>
+        </div>
       </div>
 
       {searchParams?.err ? (
@@ -301,7 +329,7 @@ export default async function EditTrainingForPerson({
       />
 
       <form action={updateTraining} className="card" style={{ marginTop: 12 }}>
-        <input type="hidden" name="clientId" value={clientId} />
+        <input type="hidden" name="clientId" value={resolvedClientId} />
         <input type="hidden" name="returnTo" value={returnTo} />
 
         <div>
@@ -377,7 +405,11 @@ export default async function EditTrainingForPerson({
         <div className="grid3" style={{ marginTop: 12 }}>
           <div>
             <label>Prezzo (€)</label>
-            <input className="input" name="priceEur" defaultValue={training.priceEur ? String(training.priceEur) : ""} />
+            <input
+              className="input"
+              name="priceEur"
+              defaultValue={training.priceEur ? String(training.priceEur) : ""}
+            />
           </div>
 
           <div>
@@ -394,7 +426,11 @@ export default async function EditTrainingForPerson({
           <div>
             <label>Attestato consegnato</label>
             <div className="row" style={{ gap: 10, marginTop: 8 }}>
-              <input type="checkbox" name="certificateDelivered" defaultChecked={training.certificateDelivered} />
+              <input
+                type="checkbox"
+                name="certificateDelivered"
+                defaultChecked={training.certificateDelivered}
+              />
               <span className="muted">Sì</span>
             </div>
           </div>
@@ -402,13 +438,45 @@ export default async function EditTrainingForPerson({
 
         <div className="grid2" style={{ marginTop: 12 }}>
           <div>
+            <label>Fatturata</label>
+            <div className="row" style={{ gap: 10, marginTop: 8 }}>
+              <input type="checkbox" name="fatturata" defaultChecked={Boolean(training.fatturata)} />
+              <span className="muted">Sì</span>
+            </div>
+          </div>
+
+          <div>
+            <label>Fatturata il</label>
+            <input
+              className="input"
+              type="date"
+              name="fatturataAt"
+              defaultValue={fmtDateInput(training.fatturataAt)}
+            />
+          </div>
+        </div>
+
+        <div className="grid2" style={{ marginTop: 12 }}>
+          <div>
             <label>Alert mesi 1</label>
-            <input className="input" type="number" name="alertMonths" min={0} defaultValue={training.alertMonths ?? 2} />
+            <input
+              className="input"
+              type="number"
+              name="alertMonths"
+              min={0}
+              defaultValue={training.alertMonths ?? 2}
+            />
           </div>
 
           <div>
             <label>Alert mesi 2</label>
-            <input className="input" type="number" name="alertMonths2" min={0} defaultValue={training.alertMonths2 ?? 3} />
+            <input
+              className="input"
+              type="number"
+              name="alertMonths2"
+              min={0}
+              defaultValue={training.alertMonths2 ?? 3}
+            />
           </div>
         </div>
 

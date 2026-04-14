@@ -11,6 +11,15 @@ type SP = {
   returnTo?: string;
 };
 
+function normalizeText(value: any) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -23,6 +32,12 @@ function addMonths(d: Date, months: number) {
 
 function fmtDate(d: Date | null | undefined) {
   return d ? new Date(d).toLocaleDateString("it-IT") : "—";
+}
+
+function normalizeContactName(lastName: string | null | undefined, firstName: string | null | undefined) {
+  return `${String(lastName ?? "").trim()} ${String(firstName ?? "").trim()}`
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function dueBadge(dueDate: Date | null | undefined) {
@@ -77,18 +92,24 @@ function dueBadge(dueDate: Date | null | undefined) {
   };
 }
 
-export default async function PeoplePage({ searchParams }: { searchParams: SP }) {
+export default async function PeoplePage({
+  searchParams,
+}: {
+  searchParams?: SP | Promise<SP>;
+}) {
   const { prisma } = await import("@/lib/prisma");
-  const qRaw = (searchParams.q ?? "").trim();
-  const q = qRaw;
-  const clientId = (searchParams.clientId ?? "TUTTI").trim();
-  const returnTo = (searchParams.returnTo ?? "").trim();
+
+  const resolvedSearchParams =
+    searchParams && typeof (searchParams as Promise<SP>).then === "function"
+      ? await (searchParams as Promise<SP>)
+      : ((searchParams as SP | undefined) ?? {});
+
+  const qRaw = String(resolvedSearchParams.q ?? "").trim();
+  const qNorm = normalizeText(qRaw);
+  const clientId = String(resolvedSearchParams.clientId ?? "TUTTI").trim();
+  const returnTo = String(resolvedSearchParams.returnTo ?? "").trim();
 
   const where: Prisma.PersonWhereInput = {};
-
-  if (q) {
-    where.OR = [{ lastName: { contains: q } }, { firstName: { contains: q } }];
-  }
 
   if (clientId !== "TUTTI") {
     where.AND = [
@@ -98,7 +119,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: SP })
     ];
   }
 
-  const [peopleRaw, clients] = await Promise.all([
+  const [peopleRaw, clients, allContacts] = await Promise.all([
     prisma.person.findMany({
       where,
       include: {
@@ -115,9 +136,52 @@ export default async function PeoplePage({ searchParams }: { searchParams: SP })
       where: { status: "ATTIVO" },
       orderBy: { name: "asc" },
     }),
+    prisma.clientContact.findMany({
+      select: {
+        id: true,
+        clientId: true,
+        name: true,
+      },
+    }),
   ]);
 
-  const people = [...peopleRaw].sort((a, b) => {
+  const contactKeys = new Set(
+    allContacts.map((c: any) =>
+      `${String(c.clientId ?? "").trim()}__${String(c.name ?? "").replace(/\s+/g, " ").trim()}`.toLowerCase()
+    )
+  );
+
+  const peopleFiltered = peopleRaw.filter((p) => {
+    if (!qNorm) return true;
+
+    const mainClientName = p.client?.name ?? "";
+    const otherClientNames = (p.personClients ?? [])
+      .map((pc) => pc.client?.name ?? "")
+      .join(" ");
+    const trainingsText = (p.trainings ?? [])
+      .map((t) => `${t.course?.name ?? ""}`)
+      .join(" ");
+
+    const haystack = normalizeText(
+      [
+        p.lastName,
+        p.firstName,
+        p.email,
+        p.phone,
+        p.role,
+        p.fiscalCode,
+        mainClientName,
+        otherClientNames,
+        trainingsText,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+    return haystack.includes(qNorm);
+  });
+
+  const people = [...peopleFiltered].sort((a, b) => {
     const aDue = a.trainings?.[0]?.dueDate ?? null;
     const bDue = b.trainings?.[0]?.dueDate ?? null;
 
@@ -175,7 +239,12 @@ export default async function PeoplePage({ searchParams }: { searchParams: SP })
         <div className="grid3">
           <div>
             <label>Cerca persona</label>
-            <input className="input" name="q" defaultValue={qRaw} placeholder="Nome o cognome..." />
+            <input
+              className="input"
+              name="q"
+              defaultValue={qRaw}
+              placeholder="Nome, cognome, email, telefono, cliente..."
+            />
           </div>
 
           <div>
@@ -212,6 +281,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: SP })
           <tr>
             <th>Persona</th>
             <th>Cliente</th>
+            <th>Rubrica contatti</th>
             <th>Altri clienti</th>
             <th>Mansione</th>
             <th>Visita medica</th>
@@ -244,6 +314,13 @@ export default async function PeoplePage({ searchParams }: { searchParams: SP })
             const nextTraining = p.trainings?.[0] ?? null;
             const badge = dueBadge(nextTraining?.dueDate ?? null);
 
+            const displayName = normalizeContactName(p.lastName, p.firstName);
+            const isInContacts = !!mainClientId
+              ? contactKeys.has(
+                  `${String(mainClientId).trim()}__${displayName}`.toLowerCase()
+                )
+              : false;
+
             return (
               <tr key={p.id}>
                 <td>
@@ -252,6 +329,27 @@ export default async function PeoplePage({ searchParams }: { searchParams: SP })
                   </Link>
                 </td>
                 <td>{p.client?.name ?? "— (one-shot)"}</td>
+                <td>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 800,
+                      background: isInContacts
+                        ? "rgba(34,197,94,0.12)"
+                        : "rgba(100,116,139,0.12)",
+                      color: isInContacts ? "#15803D" : "#475569",
+                      border: isInContacts
+                        ? "1px solid rgba(34,197,94,0.22)"
+                        : "1px solid rgba(100,116,139,0.18)",
+                    }}
+                  >
+                    {isInContacts ? "SI" : "NO"}
+                  </span>
+                </td>
                 <td className="muted">{extraClients.length ? extraClients.join(", ") : "—"}</td>
                 <td>{p.role ?? ""}</td>
                 <td>{p.medicalCheckDone ? "✅" : "—"}</td>
@@ -289,7 +387,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: SP })
 
           {people.length === 0 ? (
             <tr>
-              <td colSpan={8} className="muted">
+              <td colSpan={9} className="muted">
                 Nessuna persona.
               </td>
             </tr>

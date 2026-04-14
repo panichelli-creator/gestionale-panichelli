@@ -1,13 +1,12 @@
 import Link from "next/link";
 
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type SP = {
-  ym?: string;       // YYYY-MM
-  q?: string;        // ricerca cliente/servizio
-  clientId?: string; // filtro cliente
+  ym?: string;
+  q?: string;
+  clientId?: string;
 };
 
 type UnifiedRow = {
@@ -66,6 +65,15 @@ function parseMaybeArray(v: any): any[] {
   return [];
 }
 
+function cleanText(v: any) {
+  return String(v ?? "").replace(/\s+/g, " ").trim();
+}
+
+function isDirtyTechToken(v: any) {
+  const s = cleanText(v).toUpperCase();
+  return s.includes("VSE_CHECK:");
+}
+
 function extractPracticePayments(p: any) {
   const rows: Array<{
     label: string;
@@ -115,16 +123,16 @@ function extractPracticePayments(p: any) {
         : null;
 
     const label =
-      String(
+      cleanText(
         item.label ??
           item.name ??
           item.type ??
           item.tipo ??
           item.description ??
           ""
-      ).trim() || `Pagamento ${i + 1}`;
+      ) || `Pagamento ${i + 1}`;
 
-    const notes = String(item.notes ?? item.note ?? "").trim();
+    const notes = cleanText(item.notes ?? item.note ?? "");
 
     if (amount > 0 || paidAt || notes) {
       rows.push({
@@ -158,7 +166,7 @@ function extractPracticePayments(p: any) {
       : Number.isFinite(Number(accontoYearRaw))
       ? Number(accontoYearRaw)
       : null;
-  const accontoNotes = String(p?.accontoNotes ?? "").trim();
+  const accontoNotes = cleanText(p?.accontoNotes ?? "");
 
   if (accontoAmount > 0 || accontoDate || accontoNotes) {
     rows.push({
@@ -170,11 +178,7 @@ function extractPracticePayments(p: any) {
     });
   }
 
-  const saldoAmount = toNum(
-    p?.saldoEur ??
-      p?.balanceEur ??
-      p?.finalAmountEur
-  );
+  const saldoAmount = toNum(p?.saldoEur ?? p?.balanceEur ?? p?.finalAmountEur);
   const saldoDate =
     parseMaybeDate(p?.saldoDate) ??
     parseMaybeDate(p?.balanceDate) ??
@@ -190,7 +194,7 @@ function extractPracticePayments(p: any) {
       : Number.isFinite(Number(saldoYearRaw))
       ? Number(saldoYearRaw)
       : null;
-  const saldoNotes = String(p?.saldoNotes ?? "").trim();
+  const saldoNotes = cleanText(p?.saldoNotes ?? "");
 
   if (saldoAmount > 0 || saldoDate || saldoNotes) {
     rows.push({
@@ -209,11 +213,38 @@ function extractPracticePayments(p: any) {
   });
 }
 
-export default async function WorkReportPage({ searchParams }: { searchParams: SP }) {
+function buildSearchText(parts: any[]) {
+  return parts.filter(Boolean).map(cleanText).join(" ").toLowerCase();
+}
+
+function makeDedupKey(r: UnifiedRow) {
+  const day = r.date ? new Date(r.date).toISOString().slice(0, 10) : "";
+  return [
+    r.clientId ?? "",
+    cleanText(r.clientName).toUpperCase(),
+    cleanText(r.serviceName).toUpperCase(),
+    day,
+    toNum(r.amount).toFixed(2),
+    cleanText(r.notes).toUpperCase(),
+    r.sourceType,
+  ].join("|");
+}
+
+export default async function WorkReportPage({
+  searchParams,
+}: {
+  searchParams?: SP | Promise<SP>;
+}) {
   const { prisma } = await import("@/lib/prisma");
-  const ym = (searchParams.ym ?? defaultYm()).trim();
-  const q = (searchParams.q ?? "").trim().toLowerCase();
-  const clientId = (searchParams.clientId ?? "TUTTI").trim();
+
+  const resolvedSearchParams =
+    searchParams && typeof (searchParams as Promise<SP>).then === "function"
+      ? await (searchParams as Promise<SP>)
+      : ((searchParams as SP | undefined) ?? {});
+
+  const ym = (resolvedSearchParams.ym ?? defaultYm()).trim();
+  const q = cleanText(resolvedSearchParams.q ?? "").toLowerCase();
+  const clientId = (resolvedSearchParams.clientId ?? "TUTTI").trim();
 
   const { from, to } = monthRangeFromYm(ym);
 
@@ -222,13 +253,19 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
 
   if (q) {
     workReportWhere.OR = [
-      { client: { name: { contains: q, mode: "insensitive" } } },
-      { service: { name: { contains: q, mode: "insensitive" } } },
-      { notes: { contains: q, mode: "insensitive" } },
+      { client: { name: { contains: q } } },
+      { service: { name: { contains: q } } },
+      { notes: { contains: q } },
     ];
   }
 
-  const [clients, serviceRows, practiceRows] = await Promise.all([
+  const directServiceWhere: any = {
+    status: { in: ["SVOLTO", "FATTURATO"] },
+    lastDoneAt: { gte: from, lt: to },
+  };
+  if (clientId !== "TUTTI") directServiceWhere.clientId = clientId;
+
+  const [clients, serviceRows, directServiceRows, practiceRows] = await Promise.all([
     prisma.client.findMany({
       where: { status: "ATTIVO" },
       orderBy: { name: "asc" },
@@ -239,6 +276,16 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
       orderBy: [{ workedAt: "desc" }, { client: { name: "asc" } }],
       take: 5000,
     }),
+    prisma.clientService.findMany({
+      where: directServiceWhere,
+      include: {
+        client: true,
+        service: true,
+        site: true,
+      },
+      orderBy: [{ lastDoneAt: "desc" }, { client: { name: "asc" } }],
+      take: 5000,
+    }),
     prisma.clientPractice.findMany({
       where: clientId !== "TUTTI" ? { clientId } : undefined,
       include: { client: true },
@@ -247,16 +294,53 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
     }),
   ]);
 
-  const unifiedServiceRows: UnifiedRow[] = serviceRows.map((r: any) => ({
-    id: `wr_${r.id}`,
-    date: r.workedAt ? new Date(r.workedAt) : null,
-    clientName: r.client?.name ?? "—",
-    clientId: r.clientId ?? null,
-    serviceName: r.service?.name ?? "—",
-    amount: toNum(r.amountEur),
-    notes: String(r.notes ?? "").trim(),
-    sourceType: "SERVIZIO",
-  }));
+  const unifiedServiceRows: UnifiedRow[] = serviceRows
+    .map((r: any) => ({
+      id: `wr_${r.id}`,
+      date: r.workedAt ? new Date(r.workedAt) : null,
+      clientName: r.client?.name ?? "—",
+      clientId: r.clientId ?? null,
+      serviceName: cleanText(r.service?.name ?? "—"),
+      amount: toNum(r.amountEur),
+      notes: cleanText(r.notes),
+      sourceType: "SERVIZIO" as const,
+    }))
+    .filter((r) => !isDirtyTechToken(r.notes) && !isDirtyTechToken(r.serviceName));
+
+  const unifiedDirectServiceRows: UnifiedRow[] = directServiceRows
+    .map((r: any) => {
+      const serviceName = cleanText(
+        r.service?.name ??
+          r.name ??
+          r.serviceName ??
+          r.type ??
+          r.category ??
+          "Servizio"
+      );
+
+      const pieces = [
+        r.site?.name ? `Sede: ${cleanText(r.site.name)}` : "",
+        r.status ? `Stato: ${cleanText(r.status)}` : "",
+        cleanText(r.notes),
+      ].filter(Boolean);
+
+      return {
+        id: `cs_${r.id}`,
+        date: r.lastDoneAt ? new Date(r.lastDoneAt) : null,
+        clientName: r.client?.name ?? "—",
+        clientId: r.clientId ?? null,
+        serviceName,
+        amount: toNum(r.priceEur),
+        notes: pieces.join(" • "),
+        sourceType: "SERVIZIO" as const,
+      };
+    })
+    .filter((r) => !isDirtyTechToken(r.notes) && !isDirtyTechToken(r.serviceName))
+    .filter((r) => {
+      if (!q) return true;
+      const searchText = buildSearchText([r.clientName, r.serviceName, r.notes]);
+      return searchText.includes(q);
+    });
 
   const unifiedPracticeRows: UnifiedRow[] = [];
 
@@ -271,18 +355,15 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
       if (!(date >= from && date < to)) continue;
 
       const clientName = p.client?.name ?? "—";
-      const title = String(p.title ?? "Pratica").trim() || "Pratica";
+      const title = cleanText(p.title ?? "Pratica") || "Pratica";
 
-      const searchText = [
+      const searchText = buildSearchText([
         clientName,
         title,
         "PRATICHE",
         pay.label,
         pay.notes,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
+      ]);
 
       if (q && !searchText.includes(q)) continue;
 
@@ -300,16 +381,32 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
     }
   }
 
-  const rows: UnifiedRow[] = [...unifiedServiceRows, ...unifiedPracticeRows].sort((a, b) => {
+  const dedupMap = new Map<string, UnifiedRow>();
+
+  for (const row of [
+    ...unifiedServiceRows,
+    ...unifiedDirectServiceRows,
+    ...unifiedPracticeRows,
+  ]) {
+    const key = makeDedupKey(row);
+    if (!dedupMap.has(key)) dedupMap.set(key, row);
+  }
+
+  const rows: UnifiedRow[] = Array.from(dedupMap.values()).sort((a, b) => {
     const ad = a.date ? new Date(a.date).getTime() : 0;
     const bd = b.date ? new Date(b.date).getTime() : 0;
     if (bd !== ad) return bd - ad;
     return a.clientName.localeCompare(b.clientName, "it");
   });
 
+  const totalAmount = rows.reduce((sum, r) => sum + toNum(r.amount), 0);
+
   return (
     <div className="card">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div
+        className="row"
+        style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+      >
         <div>
           <h1 style={{ margin: 0 }}>Report lavori svolti</h1>
         </div>
@@ -339,20 +436,31 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
             <select className="input" name="clientId" defaultValue={clientId}>
               <option value="TUTTI">Tutti</option>
               {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
               ))}
             </select>
           </div>
 
           <div>
             <label>Cerca (cliente/servizio/pratica)</label>
-            <input className="input" name="q" defaultValue={searchParams.q ?? ""} placeholder="Es. Ideal / DVR / Apertura..." />
+            <input
+              className="input"
+              name="q"
+              defaultValue={resolvedSearchParams.q ?? ""}
+              placeholder="Es. Ideal / DVR / Apertura..."
+            />
           </div>
         </div>
 
         <div className="row" style={{ marginTop: 12 }}>
-          <button className="btn primary" type="submit">Applica</button>
-          <Link className="btn" href="/work-report">Reset</Link>
+          <button className="btn primary" type="submit">
+            Applica
+          </button>
+          <Link className="btn" href="/work-report">
+            Reset
+          </Link>
         </div>
       </form>
 
@@ -360,7 +468,7 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
         <h2 style={{ fontSize: 16, fontWeight: 900, margin: 0 }}>Dettaglio righe</h2>
 
         <div className="muted" style={{ marginTop: 8 }}>
-          Totale righe: <b>{rows.length}</b>
+          Totale righe: <b>{rows.length}</b> • Totale importi: <b>{eur(totalAmount)}</b>
         </div>
 
         <table className="table" style={{ marginTop: 12 }}>
@@ -395,8 +503,7 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
                           r.sourceType === "PRATICA"
                             ? "rgba(245,158,11,0.12)"
                             : "rgba(59,130,246,0.12)",
-                        color:
-                          r.sourceType === "PRATICA" ? "#92400e" : "#1d4ed8",
+                        color: r.sourceType === "PRATICA" ? "#92400e" : "#1d4ed8",
                         border:
                           r.sourceType === "PRATICA"
                             ? "1px solid rgba(245,158,11,0.28)"
@@ -406,7 +513,9 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
                       {r.sourceType}
                     </span>
                   </td>
-                  <td><b>{eur(r.amount)}</b></td>
+                  <td>
+                    <b>{eur(r.amount)}</b>
+                  </td>
                   <td style={{ maxWidth: 420, whiteSpace: "normal", wordBreak: "break-word" }}>
                     {r.notes ?? ""}
                   </td>
@@ -416,7 +525,9 @@ export default async function WorkReportPage({ searchParams }: { searchParams: S
 
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">Nessuna riga per i filtri selezionati.</td>
+                <td colSpan={6} className="muted">
+                  Nessuna riga per i filtri selezionati.
+                </td>
               </tr>
             ) : null}
           </tbody>

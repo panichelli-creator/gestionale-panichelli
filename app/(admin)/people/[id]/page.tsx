@@ -10,6 +10,17 @@ function fmt(d: Date | null) {
   return d ? new Date(d).toLocaleDateString("it-IT") : "—";
 }
 
+function toNum(v: any) {
+  if (v == null) return 0;
+  const s = typeof v === "number" ? String(v) : String(v?.toString?.() ?? v);
+  const n = Number(String(s).replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function eur(n: number) {
+  return n.toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+}
+
 type SP = {
   clientId?: string;
   returnTo?: string;
@@ -48,7 +59,6 @@ export default async function PersonDetailPage({
 
   const clientId = String(searchParams.clientId ?? "").trim();
   const returnTo = String(searchParams.returnTo ?? "").trim();
-  const returnToParam = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : "";
   const returnToAndClientParam = new URLSearchParams();
   if (clientId) returnToAndClientParam.set("clientId", clientId);
   if (returnTo) returnToAndClientParam.set("returnTo", returnTo);
@@ -84,6 +94,15 @@ export default async function PersonDetailPage({
     });
 
   const backHref = returnTo || (clientId ? `/clients/${clientId}` : "/people");
+
+  const totalTrainingValue = (person.trainings ?? []).reduce(
+    (acc, t: any) => acc + toNum(t?.priceEur),
+    0
+  );
+  const totalTrainingBilled = (person.trainings ?? [])
+    .filter((t: any) => Boolean(t?.fatturata))
+    .reduce((acc, t: any) => acc + toNum(t?.priceEur), 0);
+  const billedCount = (person.trainings ?? []).filter((t: any) => Boolean(t?.fatturata)).length;
 
   return (
     <div className="card" style={{ maxWidth: 1320, margin: "0 auto" }}>
@@ -207,25 +226,45 @@ export default async function PersonDetailPage({
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <h3 style={{ marginBottom: 8 }}>Formazione</h3>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <h3 style={{ margin: 0 }}>Formazione</h3>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <div className="card" style={{ padding: "8px 12px" }}>
+              Corsi: <b>{person.trainings.length}</b>
+            </div>
+            <div className="card" style={{ padding: "8px 12px" }}>
+              Fatturati: <b>{billedCount}</b>
+            </div>
+            <div className="card" style={{ padding: "8px 12px" }}>
+              Valore totale: <b>{eur(totalTrainingValue)}</b>
+            </div>
+            <div className="card" style={{ padding: "8px 12px" }}>
+              Totale fatturato: <b>{eur(totalTrainingBilled)}</b>
+            </div>
+          </div>
+        </div>
 
         {person.trainings.length === 0 ? (
-          <div className="muted">Nessun corso associato.</div>
+          <div className="muted" style={{ marginTop: 8 }}>Nessun corso associato.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table className="table" style={{ minWidth: 980 }}>
+          <div style={{ overflowX: "auto", marginTop: 8 }}>
+            <table className="table" style={{ minWidth: 1280 }}>
               <thead>
                 <tr>
                   <th>Corso</th>
                   <th>Effettuato il</th>
                   <th>Scadenza</th>
                   <th>Stato</th>
+                  <th>Priorità</th>
+                  <th>Prezzo</th>
                   <th>Attestato</th>
+                  <th>Fatturata</th>
+                  <th>Fatturata il</th>
                   <th style={{ textAlign: "right" }}>Apri</th>
                 </tr>
               </thead>
               <tbody>
-                {person.trainings.map((t) => (
+                {person.trainings.map((t: any) => (
                   <tr key={t.id}>
                     <td style={{ fontWeight: 700, wordBreak: "break-word" }}>
                       {t.course?.name ?? "—"}
@@ -233,7 +272,11 @@ export default async function PersonDetailPage({
                     <td>{fmt(t.performedAt)}</td>
                     <td>{fmt(t.dueDate)}</td>
                     <td>{t.status ?? "—"}</td>
+                    <td>{t.priority ?? "—"}</td>
+                    <td>{toNum(t.priceEur) > 0 ? eur(toNum(t.priceEur)) : "—"}</td>
                     <td>{t.certificateDelivered ? "SI" : "NO"}</td>
+                    <td>{t.fatturata ? "SI" : "NO"}</td>
+                    <td>{fmt(t.fatturataAt ?? null)}</td>
                     <td style={{ textAlign: "right" }}>
                       <Link href={`/people/${person.id}/training/${t.id}/edit${qs}`}>
                         Apri

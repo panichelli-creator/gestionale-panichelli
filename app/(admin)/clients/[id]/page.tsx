@@ -5,6 +5,11 @@ import { getSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const ECON_START = "--- ECONOMICA_JSON ---";
+const ECON_END = "--- FINE ECONOMICA_JSON ---";
+const ECON_B64_PREFIX = "[[ECON_B64:";
+const ECON_B64_SUFFIX = "]]";
+
 function fmt(d: Date | null | undefined) {
   return d ? new Date(d).toLocaleDateString("it-IT") : "—";
 }
@@ -84,6 +89,271 @@ function clientStatusBadgeStyle(status: string | null | undefined) {
   };
 }
 
+function getPracticeStatusLabel(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+
+  if (s === "INVIATA_REGIONE") return "Inviata Regione";
+  if (s === "INIZIO_LAVORI") return "Inizio lavori";
+  if (s === "ACCETTATO") return "Accettato";
+  if (s === "ISPEZIONE_ASL") return "Ispezione ASL";
+  if (s === "CONCLUSO") return "Concluso";
+  return "In attesa";
+}
+
+function practiceStatusBadgeStyle(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+
+  if (s === "CONCLUSO") {
+    return {
+      background: "rgba(34,197,94,0.12)",
+      color: "#166534",
+      border: "1px solid rgba(34,197,94,0.30)",
+    };
+  }
+
+  if (s === "ACCETTATO") {
+    return {
+      background: "rgba(37,99,235,0.12)",
+      color: "#1d4ed8",
+      border: "1px solid rgba(37,99,235,0.30)",
+    };
+  }
+
+  if (s === "ISPEZIONE_ASL") {
+    return {
+      background: "rgba(245,158,11,0.12)",
+      color: "#92400e",
+      border: "1px solid rgba(245,158,11,0.30)",
+    };
+  }
+
+  if (s === "INIZIO_LAVORI") {
+    return {
+      background: "rgba(168,85,247,0.12)",
+      color: "#7c3aed",
+      border: "1px solid rgba(168,85,247,0.30)",
+    };
+  }
+
+  if (s === "INVIATA_REGIONE") {
+    return {
+      background: "rgba(14,165,233,0.12)",
+      color: "#0369a1",
+      border: "1px solid rgba(14,165,233,0.30)",
+    };
+  }
+
+  return {
+    background: "rgba(0,0,0,0.04)",
+    color: "rgba(0,0,0,0.72)",
+    border: "1px solid rgba(0,0,0,0.12)",
+  };
+}
+
+function getStartYear(p: any) {
+  const raw = p?.startYear ?? null;
+  if (raw == null || raw === "") return "—";
+  return String(raw);
+}
+
+function fatturazioneBadge(v: any) {
+  if (v === true) return { label: "Fatturata", cls: "badge ok" };
+  return { label: "Da fatturare", cls: "badge warn" };
+}
+
+function normalizeEconomicPayload(raw: any) {
+  if (!raw || typeof raw !== "object") return null;
+
+  return {
+    costoPraticaEur:
+      raw.costoPraticaEur == null || raw.costoPraticaEur === "" ? null : toNum(raw.costoPraticaEur),
+    accontoEur: raw.accontoEur == null || raw.accontoEur === "" ? null : toNum(raw.accontoEur),
+    accontoDate: raw.accontoDate ? String(raw.accontoDate) : null,
+    accontoYear:
+      raw.accontoYear == null || raw.accontoYear === ""
+        ? null
+        : Number.isFinite(Number(raw.accontoYear))
+        ? Number(raw.accontoYear)
+        : null,
+    accontoNotes: raw.accontoNotes ? String(raw.accontoNotes) : null,
+    saldoEur: raw.saldoEur == null || raw.saldoEur === "" ? null : toNum(raw.saldoEur),
+    saldoDate: raw.saldoDate ? String(raw.saldoDate) : null,
+    saldoYear:
+      raw.saldoYear == null || raw.saldoYear === ""
+        ? null
+        : Number.isFinite(Number(raw.saldoYear))
+        ? Number(raw.saldoYear)
+        : null,
+    saldoNotes: raw.saldoNotes ? String(raw.saldoNotes) : null,
+    paymentRows: Array.isArray(raw.paymentRows) ? raw.paymentRows : [],
+  };
+}
+
+function splitNotesAndEconomic(rawNotes: string | null | undefined) {
+  const text = String(rawNotes ?? "");
+
+  const b64Start = text.indexOf(ECON_B64_PREFIX);
+  const b64End = b64Start >= 0 ? text.indexOf(ECON_B64_SUFFIX, b64Start) : -1;
+
+  if (b64Start !== -1 && b64End !== -1 && b64End > b64Start) {
+    const cleanNotes = text.slice(0, b64Start).trim();
+    const encoded = text.slice(b64Start + ECON_B64_PREFIX.length, b64End).trim();
+
+    try {
+      const decoded = Buffer.from(encoded, "base64").toString("utf8");
+      const parsed = JSON.parse(decoded);
+      return {
+        cleanNotes,
+        economic: normalizeEconomicPayload(parsed),
+      };
+    } catch {
+      return {
+        cleanNotes: text.trim(),
+        economic: null as any,
+      };
+    }
+  }
+
+  const start = text.indexOf(ECON_START);
+  const end = text.indexOf(ECON_END);
+
+  if (start === -1 || end === -1 || end <= start) {
+    return {
+      cleanNotes: text.trim(),
+      economic: null as any,
+    };
+  }
+
+  const cleanNotes = text.slice(0, start).trim();
+  const jsonText = text.slice(start + ECON_START.length, end).trim();
+
+  try {
+    const parsed = JSON.parse(jsonText);
+    return {
+      cleanNotes,
+      economic: normalizeEconomicPayload(parsed),
+    };
+  } catch {
+    return {
+      cleanNotes: text.trim(),
+      economic: null as any,
+    };
+  }
+}
+
+function getPracticeAmount(p: any) {
+  const notesParts = splitNotesAndEconomic(p?.notes);
+  const econ = notesParts.economic;
+
+  const candidates = [
+    p?.amountEur,
+    econ?.costoPraticaEur,
+    p?.costoPraticaEur,
+    p?.practiceAmountEur,
+    p?.totalAmountEur,
+    p?.priceEur,
+    p?.totalEur,
+    p?.clientPriceEur,
+    p?.valueEur,
+    p?.price,
+    p?.total,
+    p?.amount,
+  ];
+
+  for (const v of candidates) {
+    const n = toNum(v);
+    if (n !== 0) return n;
+  }
+
+  return 0;
+}
+
+function billingStatusLabel(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+
+  if (s === "DA_FATTURARE") return "Da fatturare";
+  if (s === "FATTURA_DA_INVIARE") return "Fattura da inviare";
+  if (s === "FATTURATA") return "Fatturata";
+  if (s === "INCASSATA") return "Incassata";
+
+  return "—";
+}
+
+function billingStatusStyle(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+
+  if (s === "INCASSATA") {
+    return {
+      background: "rgba(34,197,94,0.12)",
+      color: "#166534",
+      border: "1px solid rgba(34,197,94,0.30)",
+    };
+  }
+
+  if (s === "FATTURATA") {
+    return {
+      background: "rgba(37,99,235,0.12)",
+      color: "#1d4ed8",
+      border: "1px solid rgba(37,99,235,0.30)",
+    };
+  }
+
+  if (s === "FATTURA_DA_INVIARE") {
+    return {
+      background: "rgba(245,158,11,0.12)",
+      color: "#92400e",
+      border: "1px solid rgba(245,158,11,0.30)",
+    };
+  }
+
+  return {
+    background: "rgba(0,0,0,0.04)",
+    color: "rgba(0,0,0,0.72)",
+    border: "1px solid rgba(0,0,0,0.12)",
+  };
+}
+
+function getBillingSummary(p: any) {
+  const steps = Array.isArray(p?.billingSteps) ? p.billingSteps : [];
+
+  const total = steps.reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
+  const daInviare = steps.filter(
+    (row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURA_DA_INVIARE"
+  ).length;
+  const fatturato = steps
+    .filter((row: any) =>
+      ["FATTURATA", "INCASSATA"].includes(String(row?.billingStatus ?? "").trim().toUpperCase())
+    )
+    .reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
+  const incassato = steps
+    .filter((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "INCASSATA")
+    .reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
+
+  let mainStatus = "—";
+
+  if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURA_DA_INVIARE")) {
+    mainStatus = "FATTURA_DA_INVIARE";
+  } else if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "DA_FATTURARE")) {
+    mainStatus = "DA_FATTURARE";
+  } else if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURATA")) {
+    mainStatus = "FATTURATA";
+  } else if (
+    steps.length > 0 &&
+    steps.every((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "INCASSATA")
+  ) {
+    mainStatus = "INCASSATA";
+  }
+
+  return {
+    total,
+    daInviare,
+    fatturato,
+    incassato,
+    count: steps.length,
+    mainStatus,
+  };
+}
+
 export default async function ClientDetailPage({
   params,
 }: {
@@ -103,14 +373,34 @@ export default async function ClientDetailPage({
         orderBy: { dueDate: "asc" },
       },
       people: {
+        include: {
+          trainings: {
+            include: { course: true },
+            orderBy: [{ dueDate: "asc" }],
+          },
+        },
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       },
       personClients: {
         include: {
-          person: true,
+          person: {
+            include: {
+              trainings: {
+                include: { course: true },
+                orderBy: [{ dueDate: "asc" }],
+              },
+            },
+          },
         },
       },
-      practices: { orderBy: [{ inApertureList: "desc" }, { practiceDate: "desc" }] as any },
+      practices: {
+        include: {
+          billingSteps: {
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          },
+        },
+        orderBy: [{ inApertureList: "desc" }, { practiceDate: "desc" }] as any,
+      },
     },
   });
 
@@ -152,14 +442,66 @@ export default async function ClientDetailPage({
     return String(a.firstName ?? "").localeCompare(String(b.firstName ?? ""), "it");
   });
 
+  const trainingRows = peopleRows
+    .flatMap((p: any) =>
+      (Array.isArray(p.trainings) ? p.trainings : []).map((t: any) => ({
+        ...t,
+        __person: p,
+      }))
+    )
+    .sort((a: any, b: any) => {
+      const at = a?.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      const bt = b?.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      if (at !== bt) return at - bt;
+      const al = String(a?.__person?.lastName ?? "").localeCompare(String(b?.__person?.lastName ?? ""), "it");
+      if (al !== 0) return al;
+      return String(a?.course?.name ?? "").localeCompare(String(b?.course?.name ?? ""), "it");
+    });
+
+  const today = startOfDay(new Date());
+  const trainingScaduti = trainingRows.filter((t: any) => t?.dueDate && startOfDay(new Date(t.dueDate)) < today).length;
+  const trainingFatturati = trainingRows.filter((t: any) => Boolean(t?.fatturata)).length;
+  const trainingTotalValue = trainingRows.reduce((acc: number, t: any) => acc + toNum(t?.priceEur), 0);
+  const trainingBilledValue = trainingRows
+    .filter((t: any) => Boolean(t?.fatturata))
+    .reduce((acc: number, t: any) => acc + toNum(t?.priceEur), 0);
+
   const apertureCount = client.practices.filter((p: any) => Boolean(p.inApertureList)).length;
+  const practicesInAttesa = client.practices.filter(
+    (p: any) => String(p.apertureStatus ?? "IN_ATTESA").trim().toUpperCase() === "IN_ATTESA"
+  ).length;
+  const practicesInCorso = client.practices.filter((p: any) =>
+    ["INVIATA_REGIONE", "INIZIO_LAVORI", "ACCETTATO", "ISPEZIONE_ASL"].includes(
+      String(p.apertureStatus ?? "").trim().toUpperCase()
+    )
+  ).length;
+  const practicesConcluse = client.practices.filter(
+    (p: any) => String(p.apertureStatus ?? "").trim().toUpperCase() === "CONCLUSO"
+  ).length;
+  const totalPracticesValue = client.practices.reduce(
+    (acc: number, p: any) => acc + getPracticeAmount(p),
+    0
+  );
+  const totalBillingRows = client.practices.reduce(
+    (acc: number, p: any) => acc + (Array.isArray(p.billingSteps) ? p.billingSteps.length : 0),
+    0
+  );
+  const totalBillingDaInviare = client.practices.reduce(
+    (acc: number, p: any) => acc + getBillingSummary(p).daInviare,
+    0
+  );
+  const totalBillingFatturato = client.practices.reduce(
+    (acc: number, p: any) => acc + getBillingSummary(p).fatturato,
+    0
+  );
+  const totalBillingIncassato = client.practices.reduce(
+    (acc: number, p: any) => acc + getBillingSummary(p).incassato,
+    0
+  );
 
   return (
     <div className="card">
-      <div
-        className="row"
-        style={{ justifyContent: "space-between", alignItems: "center" }}
-      >
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
         <h1>{client.name}</h1>
 
         <div className="row" style={{ gap: 8 }}>
@@ -175,10 +517,7 @@ export default async function ClientDetailPage({
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <div
-          className="row"
-          style={{ justifyContent: "space-between", alignItems: "center" }}
-        >
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
           <h2>Dati generali</h2>
 
           {!isIngegnereClinico ? (
@@ -495,29 +834,120 @@ export default async function ClientDetailPage({
                 <th>Mansione</th>
                 <th>Email</th>
                 <th>Telefono</th>
+                <th>Corsi</th>
+                <th>Fatturati</th>
               </tr>
             </thead>
             <tbody>
-              {peopleRows.map((p: any) => (
-                <tr key={p.id}>
+              {peopleRows.map((p: any) => {
+                const trainings = Array.isArray(p.trainings) ? p.trainings : [];
+                const billed = trainings.filter((t: any) => Boolean(t?.fatturata)).length;
+
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <Link
+                        href={`/people/${p.id}?clientId=${client.id}&returnTo=${returnToParam}`}
+                        style={{ fontWeight: 700 }}
+                      >
+                        {p.lastName} {p.firstName}
+                      </Link>
+                    </td>
+                    <td>{p.role ?? "—"}</td>
+                    <td>{p.email ?? "—"}</td>
+                    <td>{p.phone ?? "—"}</td>
+                    <td>{trainings.length}</td>
+                    <td>{billed}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="muted" style={{ marginTop: 10 }}>
+            Nessuna persona
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h2>Formazione</h2>
+
+          {!isIngegnereClinico ? (
+            <Link className="btn primary" href={`/training?clientId=${client.id}`}>
+              Apri formazione
+            </Link>
+          ) : (
+            <div className="muted">Sola consultazione</div>
+          )}
+        </div>
+
+        <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 10 }}>
+          <div className="card">
+            Totale corsi: <b>{trainingRows.length}</b>
+          </div>
+          <div className="card">
+            Scaduti: <b>{trainingScaduti}</b>
+          </div>
+          <div className="card">
+            Fatturati: <b>{trainingFatturati}</b>
+          </div>
+          <div className="card">
+            Valore totale: <b>{eur(trainingTotalValue)}</b>
+          </div>
+          <div className="card">
+            Totale fatturato: <b>{eur(trainingBilledValue)}</b>
+          </div>
+        </div>
+
+        {trainingRows.length ? (
+          <table className="table" style={{ marginTop: 10 }}>
+            <thead>
+              <tr>
+                <th>Persona</th>
+                <th>Corso</th>
+                <th>Effettuato il</th>
+                <th>Scadenza</th>
+                <th>Stato</th>
+                <th>Prezzo</th>
+                <th>Attestato</th>
+                <th>Fatturata</th>
+                <th>Fatturata il</th>
+                <th>Apri</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trainingRows.map((t: any) => (
+                <tr key={t.id}>
                   <td>
                     <Link
-                      href={`/people/${p.id}?clientId=${client.id}&returnTo=${returnToParam}`}
+                      href={`/people/${t.__person.id}?clientId=${client.id}&returnTo=${returnToParam}`}
                       style={{ fontWeight: 700 }}
                     >
-                      {p.lastName} {p.firstName}
+                      {t.__person.lastName} {t.__person.firstName}
                     </Link>
                   </td>
-                  <td>{p.role ?? "—"}</td>
-                  <td>{p.email ?? "—"}</td>
-                  <td>{p.phone ?? "—"}</td>
+                  <td>{t.course?.name ?? "—"}</td>
+                  <td>{fmt(t.performedAt)}</td>
+                  <td>{fmt(t.dueDate)}</td>
+                  <td>{t.status ?? "—"}</td>
+                  <td>{toNum(t.priceEur) > 0 ? eur(toNum(t.priceEur)) : "—"}</td>
+                  <td>{t.certificateDelivered ? "SI" : "NO"}</td>
+                  <td>{t.fatturata ? "SI" : "NO"}</td>
+                  <td>{fmt(t.fatturataAt ?? null)}</td>
+                  <td>
+                    <Link className="btn" href={`/people/${t.__person.id}/training/${t.id}/edit?clientId=${client.id}&returnTo=${returnToParam}`}>
+                      Apri
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         ) : (
           <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna persona
+            Nessun corso associato
           </div>
         )}
       </div>
@@ -575,7 +1005,10 @@ export default async function ClientDetailPage({
                     <td>{eur(toNum(r.costoServizio))}</td>
 
                     <td>
-                      <Link className="btn" href={`/ingegneria-clinica/${r.id}?clientId=${client.id}&returnTo=${returnToParam}`}>
+                      <Link
+                        className="btn"
+                        href={`/ingegneria-clinica/${r.id}?clientId=${client.id}&returnTo=${returnToParam}`}
+                      >
                         Apri
                       </Link>
                     </td>
@@ -585,21 +1018,26 @@ export default async function ClientDetailPage({
             </tbody>
           </table>
         ) : (
-          <div className="muted">Nessuna verifica</div>
+          <div className="muted" style={{ marginTop: 10 }}>
+            Nessuna verifica
+          </div>
         )}
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Pratiche</h2>
 
           {!isIngegnereClinico ? (
-            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <Link className="btn" href={`/clients/${client.id}/practices/new?returnTo=${returnToParam}`}>
+            <div className="row" style={{ gap: 8 }}>
+              <Link className="btn" href={`/clients/${client.id}/practices/new`}>
                 Nuova pratica
               </Link>
-              <Link className="btn primary" href="/aperture">
-                Apri lista Aperture
+              <Link className="btn" href={`/aperture`}>
+                Vai ad Aperture
+              </Link>
+              <Link className="btn primary" href={`/pratiche-fatturazione`}>
+                Fatturazione pratiche
               </Link>
             </div>
           ) : (
@@ -607,47 +1045,117 @@ export default async function ClientDetailPage({
           )}
         </div>
 
-        <div className="muted">
-          Totale pratiche: <b>{client.practices.length}</b> • In Aperture: <b>{apertureCount}</b>
+        <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 10 }}>
+          <div className="card">
+            In Aperture: <b>{apertureCount}</b>
+          </div>
+          <div className="card">
+            In attesa: <b>{practicesInAttesa}</b>
+          </div>
+          <div className="card">
+            In corso: <b>{practicesInCorso}</b>
+          </div>
+          <div className="card">
+            Concluse: <b>{practicesConcluse}</b>
+          </div>
+          <div className="card">
+            Valore totale: <b>{eur(totalPracticesValue)}</b>
+          </div>
+          <div className="card">
+            SAL: <b>{totalBillingRows}</b>
+          </div>
+          <div className="card">
+            Da inviare: <b>{totalBillingDaInviare}</b>
+          </div>
+          <div className="card">
+            Fatturato SAL: <b>{eur(totalBillingFatturato)}</b>
+          </div>
+          <div className="card">
+            Incassato SAL: <b>{eur(totalBillingIncassato)}</b>
+          </div>
         </div>
 
         {client.practices.length ? (
-          <table className="table">
+          <table className="table" style={{ marginTop: 10 }}>
             <thead>
               <tr>
                 <th>Pratica</th>
                 <th>Data</th>
-                <th>Numero determina</th>
+                <th>Anno</th>
+                <th>Stato</th>
                 <th>In Aperture</th>
+                <th>Importo</th>
+                <th>SAL</th>
+                <th>Stato SAL</th>
+                <th>Da inviare</th>
                 <th>Apri</th>
               </tr>
             </thead>
-
             <tbody>
-              {client.practices.map((p: any) => (
-                <tr key={p.id}>
-                  <td>{p.title}</td>
-                  <td>{fmt(p.practiceDate)}</td>
-                  <td>{p.determinaNumber ?? "—"}</td>
-                  <td>{p.inApertureList ? "SI" : "NO"}</td>
-                  <td>
-                    {!isIngegnereClinico ? (
-                      <Link
-                        className="btn"
-                        href={`/clients/${client.id}/practices/${p.id}?returnTo=${returnToParam}`}
+              {client.practices.map((p: any) => {
+                const fatt = fatturazioneBadge(p.fatturata);
+                const practiceAmount = getPracticeAmount(p);
+                const billing = getBillingSummary(p);
+
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <b>{p.title ?? "—"}</b>
+                    </td>
+                    <td>{fmt(p.practiceDate)}</td>
+                    <td>{getStartYear(p)}</td>
+                    <td>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "4px 10px",
+                          borderRadius: 999,
+                          fontSize: 12,
+                          fontWeight: 800,
+                          ...practiceStatusBadgeStyle(p.apertureStatus),
+                        }}
                       >
+                        {getPracticeStatusLabel(p.apertureStatus)}
+                      </span>
+                    </td>
+                    <td>{p.inApertureList ? "SI" : "NO"}</td>
+                    <td>{practiceAmount > 0 ? eur(practiceAmount) : "—"}</td>
+                    <td>{billing.count ? eur(billing.total) : "—"}</td>
+                    <td>
+                      {billing.mainStatus !== "—" ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 800,
+                            ...billingStatusStyle(billing.mainStatus),
+                          }}
+                        >
+                          {billingStatusLabel(billing.mainStatus)}
+                        </span>
+                      ) : (
+                        <span className={fatt.cls}>{fatt.label}</span>
+                      )}
+                    </td>
+                    <td>{billing.daInviare > 0 ? billing.daInviare : "—"}</td>
+                    <td>
+                      <Link className="btn" href={`/clients/${client.id}/practices/${p.id}`}>
                         Apri
                       </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         ) : (
-          <div className="muted">Nessuna pratica</div>
+          <div className="muted" style={{ marginTop: 10 }}>
+            Nessuna pratica
+          </div>
         )}
       </div>
     </div>

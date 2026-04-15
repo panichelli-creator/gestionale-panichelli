@@ -546,44 +546,44 @@ export default async function MapPage({
   const plannedServiceIds = existingPlanRows.map((p) => p.clientServiceId);
 
   const rows = await prisma.clientService.findMany({
-    where: {
-      site: {
-        isNot: null,
-      },
-      OR: [
-        {
-          dueDate: { lt: to },
-          status: { notIn: ["SVOLTO", "FATTURATO"] as any },
-        },
-        ...(plannedServiceIds.length ? [{ id: { in: plannedServiceIds } }] : []),
-      ],
-      ...(service
-        ? {
-            service: {
-              name: service,
-            },
-          }
-        : {}),
+  where: {
+    site: {
+      isNot: null,
     },
-    include: {
-      client: {
-        include: {
-          contacts: {
-            select: {
-              name: true,
-              phone: true,
-              role: true,
-            },
-            orderBy: [{ role: "asc" }, { name: "asc" }],
+    OR: [
+      {
+        dueDate: { lt: to },
+        status: { notIn: ["SVOLTO", "FATTURATO"] as any },
+      },
+      ...(plannedServiceIds.length ? [{ id: { in: plannedServiceIds } }] : []),
+    ],
+    ...(service
+      ? {
+          service: {
+            name: service,
           },
+        }
+      : {}),
+  },
+  include: {
+    client: {
+      include: {
+        contacts: {
+          select: {
+            name: true,
+            phone: true,
+            role: true,
+          },
+          orderBy: [{ role: "asc" }, { name: "asc" }],
         },
       },
-      service: true,
-      site: true,
     },
-    orderBy: [{ dueDate: "asc" }, { client: { name: "asc" } }],
-    take: 200000,
-  });
+    service: true,
+    site: true,
+  },
+  orderBy: [{ dueDate: "asc" }, { client: { name: "asc" } }],
+  take: 200000,
+});
 
   const planMap = new Map(
     existingPlanRows.map((p) => [

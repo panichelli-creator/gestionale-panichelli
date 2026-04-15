@@ -67,15 +67,17 @@ function normalizeEconomicPayload(raw: any): EconomicPayload | null {
 
   return {
     costoPraticaEur:
-      raw.costoPraticaEur == null || raw.costoPraticaEur === "" ? null : toNum(raw.costoPraticaEur),
+      raw.costoPraticaEur == null || raw.costoPraticaEur === ""
+        ? null
+        : toNum(raw.costoPraticaEur),
     accontoEur: raw.accontoEur == null || raw.accontoEur === "" ? null : toNum(raw.accontoEur),
     accontoDate: raw.accontoDate ? String(raw.accontoDate) : null,
     accontoYear:
       raw.accontoYear == null || raw.accontoYear === ""
         ? null
         : Number.isFinite(Number(raw.accontoYear))
-        ? Number(raw.accontoYear)
-        : null,
+          ? Number(raw.accontoYear)
+          : null,
     accontoNotes: raw.accontoNotes ? String(raw.accontoNotes) : null,
     saldoEur: raw.saldoEur == null || raw.saldoEur === "" ? null : toNum(raw.saldoEur),
     saldoDate: raw.saldoDate ? String(raw.saldoDate) : null,
@@ -83,8 +85,8 @@ function normalizeEconomicPayload(raw: any): EconomicPayload | null {
       raw.saldoYear == null || raw.saldoYear === ""
         ? null
         : Number.isFinite(Number(raw.saldoYear))
-        ? Number(raw.saldoYear)
-        : null,
+          ? Number(raw.saldoYear)
+          : null,
     saldoNotes: raw.saldoNotes ? String(raw.saldoNotes) : null,
     paymentRows: paymentRowsRaw
       .map((row: any, i: number) => ({
@@ -95,8 +97,8 @@ function normalizeEconomicPayload(raw: any): EconomicPayload | null {
           row?.paidYear == null || row?.paidYear === ""
             ? null
             : Number.isFinite(Number(row.paidYear))
-            ? Number(row.paidYear)
-            : null,
+              ? Number(row.paidYear)
+              : null,
         notes: row?.notes ? String(row.notes) : null,
       }))
       .filter((row: any) => row.label || row.amountEur || row.paidAt || row.notes),
@@ -249,23 +251,49 @@ export default async function EditPracticePage({
     }
 
     const stepIds = formData.getAll("billingStepId").map((v) => String(v ?? "").trim());
-    const stepSortOrders = formData.getAll("billingStepSortOrder").map((v) => String(v ?? "").trim());
+    const stepSortOrders = formData
+      .getAll("billingStepSortOrder")
+      .map((v) => String(v ?? "").trim());
     const stepLabels = formData.getAll("billingStepLabel").map((v) => String(v ?? "").trim());
-    const stepTypes = formData.getAll("billingStepType").map((v) => String(v ?? "").trim().toUpperCase());
-    const stepTriggers = formData.getAll("billingStepTriggerStatus").map((v) => String(v ?? "").trim().toUpperCase());
-    const stepAmounts = formData.getAll("billingStepAmountEur").map((v) => String(v ?? "").trim());
-    const stepStatuses = formData.getAll("billingStepStatus").map((v) => String(v ?? "").trim().toUpperCase());
-    const stepInvoiceNumbers = formData.getAll("billingStepInvoiceNumber").map((v) => String(v ?? "").trim());
-    const stepInvoiceDates = formData.getAll("billingStepInvoiceDate").map((v) => String(v ?? "").trim());
+    const stepTypes = formData
+      .getAll("billingStepType")
+      .map((v) => String(v ?? "").trim().toUpperCase());
+    const stepTriggers = formData
+      .getAll("billingStepTriggerStatus")
+      .map((v) => String(v ?? "").trim().toUpperCase());
+    const stepAmounts = formData
+      .getAll("billingStepAmountEur")
+      .map((v) => String(v ?? "").trim());
+    const stepStatuses = formData
+      .getAll("billingStepStatus")
+      .map((v) => String(v ?? "").trim().toUpperCase());
+    const stepInvoiceNumbers = formData
+      .getAll("billingStepInvoiceNumber")
+      .map((v) => String(v ?? "").trim());
+    const stepInvoiceDates = formData
+      .getAll("billingStepInvoiceDate")
+      .map((v) => String(v ?? "").trim());
     const stepPaidAts = formData.getAll("billingStepPaidAt").map((v) => String(v ?? "").trim());
     const stepNotes = formData.getAll("billingStepNotes").map((v) => String(v ?? "").trim());
 
-    const existingStepIds = new Set(
+    const existingStepIds = new Set<string>(
       (Array.isArray(row.billingSteps) ? row.billingSteps : []).map((x: any) => String(x.id))
     );
 
     const incomingUsedIds = new Set<string>();
-    const billingStepRows = [];
+    const billingStepRows: Array<{
+      id: string | null;
+      sortOrder: number;
+      label: string;
+      billingType: string;
+      triggerStatus: string | null;
+      amountEur: number;
+      billingStatus: string;
+      invoiceNumber: string | null;
+      invoiceDate: Date | null;
+      paidAt: Date | null;
+      notes: string | null;
+    }> = [];
 
     for (let i = 0; i < stepLabels.length; i++) {
       const id = stepIds[i] || "";
@@ -275,7 +303,9 @@ export default async function EditPracticePage({
       const amountEurStep = toNum(stepAmounts[i]);
       const billingStatus = stepStatuses[i] || "DA_FATTURARE";
       const invoiceNumber = stepInvoiceNumbers[i] || null;
-      const invoiceDateInput = stepInvoiceDates[i] ? new Date(`${stepInvoiceDates[i]}T12:00:00`) : null;
+      const invoiceDateInput = stepInvoiceDates[i]
+        ? new Date(`${stepInvoiceDates[i]}T12:00:00`)
+        : null;
       const paidAtInput = stepPaidAts[i] ? new Date(`${stepPaidAts[i]}T12:00:00`) : null;
       const note = stepNotes[i] || null;
       const sortOrderRaw = stepSortOrders[i];
@@ -331,9 +361,7 @@ export default async function EditPracticePage({
       });
     }
 
-    const deleteIds = Array.from(existingStepIds as Set<string>).filter(
-  (id) => !incomingUsedIds.has(id as string)
-);
+    const deleteIds = Array.from(existingStepIds).filter((id: string) => !incomingUsedIds.has(id));
 
     await prisma.clientPractice.update({
       where: { id: practiceId },
@@ -345,7 +373,7 @@ export default async function EditPracticePage({
         apertureStatus,
         startYear,
         fatturata,
-       fatturataAt: fatturata ? new Date() : null,
+        fatturataAt: fatturata ? new Date() : null,
         notes: buildNotesWithEconomic(notes, econ),
       },
     });
@@ -497,11 +525,7 @@ export default async function EditPracticePage({
 
         <div className="card" style={{ marginTop: 12, padding: 12 }}>
           <label style={{ display: "flex", gap: 10 }}>
-            <input
-              type="checkbox"
-              name="fatturata"
-              defaultChecked={Boolean(row.fatturata)}
-            />
+            <input type="checkbox" name="fatturata" defaultChecked={Boolean(row.fatturata)} />
             <b>Pratica fatturata</b>
           </label>
 

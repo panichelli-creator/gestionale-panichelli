@@ -551,7 +551,10 @@ export default async function MapPage({
         isNot: null,
       },
       OR: [
-        { dueDate: { gte: from, lt: to } },
+        {
+          dueDate: { lt: to },
+          status: { notIn: ["SVOLTO", "FATTURATO"] as any },
+        },
         ...(plannedServiceIds.length ? [{ id: { in: plannedServiceIds } }] : []),
       ],
       ...(service
@@ -578,7 +581,7 @@ export default async function MapPage({
       service: true,
       site: true,
     },
-    orderBy: [{ client: { name: "asc" } }, { dueDate: "asc" }],
+    orderBy: [{ dueDate: "asc" }, { client: { name: "asc" } }],
     take: 200000,
   });
 

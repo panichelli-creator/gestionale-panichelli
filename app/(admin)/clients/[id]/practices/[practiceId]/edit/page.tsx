@@ -331,7 +331,9 @@ export default async function EditPracticePage({
       });
     }
 
-    const deleteIds = Array.from(existingStepIds).filter((id) => !incomingUsedIds.has(id));
+    const deleteIds = Array.from(existingStepIds as Set<string>).filter(
+  (id) => !incomingUsedIds.has(id as string)
+);
 
     await prisma.clientPractice.update({
       where: { id: practiceId },
@@ -343,7 +345,7 @@ export default async function EditPracticePage({
         apertureStatus,
         startYear,
         fatturata,
-        fatturataAt: fatturata ? p.fatturataAt ?? new Date() : null,
+       fatturataAt: fatturata ? new Date() : null,
         notes: buildNotesWithEconomic(notes, econ),
       },
     });

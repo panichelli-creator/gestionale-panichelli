@@ -18,6 +18,21 @@ function requireAdmin() {
   return s;
 }
 
+function isVercelRuntime() {
+  return (
+    String(process.env.VERCEL ?? "").trim() === "1" ||
+    String(process.env.VERCEL_ENV ?? "").trim() !== ""
+  );
+}
+
+function ensureLocalBackupAllowed() {
+  if (isVercelRuntime()) {
+    throw new Error(
+      "Backup locale non disponibile su Vercel. Usa backup esterno del database/Supabase."
+    );
+  }
+}
+
 function pad(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -113,7 +128,7 @@ function runPgDump(outputFile: string) {
 
   if (result.error) {
     throw new Error(
-      `pg_dump non disponibile. Installa i client PostgreSQL oppure aggiungi pg_dump al PATH.`
+      "pg_dump non disponibile. Installa i client PostgreSQL oppure aggiungi pg_dump al PATH."
     );
   }
 
@@ -149,8 +164,12 @@ function createAutomaticBackupIfMissing() {
 
 export async function listBackups() {
   requireAdmin();
-  ensureDir(BACKUP_DIR);
 
+  if (isVercelRuntime()) {
+    return [];
+  }
+
+  ensureDir(BACKUP_DIR);
   createAutomaticBackupIfMissing();
 
   const files = fs
@@ -174,6 +193,7 @@ export async function listBackups() {
 
 export async function backupNow() {
   requireAdmin();
+  ensureLocalBackupAllowed();
   ensureDir(BACKUP_DIR);
 
   const filename = `backup_manual_${stamp()}.sql`;
@@ -189,6 +209,7 @@ export async function backupNow() {
 
 export async function restoreBackup(formData: FormData) {
   requireAdmin();
+  ensureLocalBackupAllowed();
   ensureDir(BACKUP_DIR);
 
   const filename = String(formData.get("filename") ?? "").trim();

@@ -1,4 +1,7 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
+dotenv.config({ path: ".env" });
+
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

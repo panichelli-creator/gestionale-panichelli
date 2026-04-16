@@ -9,15 +9,27 @@ export default function ExportButtons() {
 
   return (
     <div className="card" style={{ marginTop: 12 }}>
-      <h2>Export CSV</h2>
+      <h2>Export</h2>
 
-      <div className="row" style={{ marginTop: 12, gap: 8 }}>
+      <div className="muted" style={{ marginTop: 6 }}>
+        CSV rapidi + file Excel unico per template/import completo.
+      </div>
+
+      <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
         <a className="btn" href="/import-export/export/people">
-          Scarica Persone
+          Scarica Persone CSV
         </a>
 
         <a className="btn" href="/import-export/export/clients">
-          Scarica Clienti
+          Scarica Clienti CSV
+        </a>
+
+        <a className="btn primary" href="/import-export/export/template-xlsx">
+          Scarica Template Excel
+        </a>
+
+        <a className="btn" href="/import-export/export/full-xlsx">
+          Esporta Excel Completo
         </a>
 
         <button

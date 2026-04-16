@@ -24,9 +24,9 @@ export default function ExportButtons() {
           Scarica Clienti CSV
         </a>
 
-        <a className="btn primary" href="/api/import-export/export/template-xlsx">
-          Scarica Template Excel
-        </a>
+    <a className="btn primary" href="/import-export/template-xlsx">
+  Scarica Template Excel
+</a>
 
         <a className="btn" href="/api/import-export/export/full-xlsx">
           Esporta Excel Completo

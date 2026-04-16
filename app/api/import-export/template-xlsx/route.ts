@@ -1,10 +1,9 @@
-import { redirect } from "next/navigation";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 export const runtime = "nodejs";
 
-export default async function TemplateXlsxPage() {
+export async function GET() {
   const XLSX = await import("xlsx");
 
   function makeSheet(headers: string[]) {
@@ -205,11 +204,11 @@ export default async function TemplateXlsxPage() {
     XLSX.utils.aoa_to_sheet([
       ["FOGLIO", "NOTE"],
       ["CLIENTI", "Date formato YYYY-MM-DD. Campi vuoti ok."],
-      ["SEDI", "ClienteCodice o ClienteNome obbligatorio per collegare la sede."],
-      ["CONTATTI", "ListeMarketing separate da |  es: ASO|MEDICI"],
+      ["SEDI", "ClienteCodice o ClienteNome obbligatorio."],
+      ["CONTATTI", "ListeMarketing separate da |"],
       ["PERSONE", "AltriClienti e AltreSedi separati da |"],
       ["SERVIZI", "Periodicità es: ANNUALE, SEMESTRALE, BIENNALE"],
-      ["FORMAZIONE", "Persona scritta come 'Cognome Nome'"],
+      ["FORMAZIONE", "Persona come 'Cognome Nome'"],
       ["PRATICHE", "Foglio opzionale"],
       ["PRATICHE_SAL", "Foglio opzionale"],
       ["VSE", "Foglio opzionale"],
@@ -220,8 +219,7 @@ export default async function TemplateXlsxPage() {
 
   const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
-  return new Response(buffer, {
-    status: 200,
+  return new NextResponse(buffer, {
     headers: {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

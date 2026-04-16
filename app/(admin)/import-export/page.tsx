@@ -1,8 +1,10 @@
+
 import Link from "next/link";
 import ExportButtons from "./ExportButtons";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const runtime = "nodejs";
 
 function ImportTrainingCard({ title, courseName }: { title: string; courseName: string }) {
   async function action(formData: FormData) {

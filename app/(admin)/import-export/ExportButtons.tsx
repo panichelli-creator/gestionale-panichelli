@@ -24,9 +24,9 @@ export default function ExportButtons() {
           Scarica Template Excel
         </a>
 
-        <button className="btn" type="button" disabled>
-          Esporta Excel Completo (da fare)
-        </button>
+     <a className="btn" href="/api/import-export/export/full-xlsx">
+       Esporta Excel Completo
+     </a>
 
         <button
           className="btn"

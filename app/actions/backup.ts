@@ -1,14 +1,21 @@
 "use server";
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/session";
 
-const ROOT = process.cwd();
-const BACKUP_DIR = path.join(ROOT, "backups");
 const KEEP_DAYS = 7;
+const DROPBOX_BACKUP_DIR = "/panichelli-backups";
+
+type BackupRow = {
+  name: string;
+  size: number;
+  mtimeMs: number;
+  mtimeIso: string;
+};
 
 function requireAdmin() {
   const s = getSession();
@@ -25,13 +32,15 @@ function isVercelRuntime() {
   );
 }
 
-function ensureLocalBackupAllowed() {
-  if (isVercelRuntime()) {
-    throw new Error(
-      "Backup locale non disponibile su Vercel. Usa backup esterno del database/Supabase."
-    );
-  }
+function getLocalBackupDir() {
+  const customDir = String(process.env.BACKUP_DIR ?? "").trim();
+  if (customDir) return customDir;
+
+  const home = os.homedir();
+  return path.join(home, "Documents", "PanichelliBackups");
 }
+
+const BACKUP_DIR = getLocalBackupDir();
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -76,7 +85,7 @@ function cleanupOld() {
     .filter((f) => f.endsWith(".sql") && f.startsWith("backup_"))
     .map((f) => {
       const p = path.join(BACKUP_DIR, f);
-      return { f, p, t: fs.statSync(p).mtimeMs };
+      return { p, t: fs.statSync(p).mtimeMs };
     });
 
   for (const it of files) {
@@ -148,7 +157,136 @@ function hasAutomaticBackupForToday() {
   return exists(path.join(BACKUP_DIR, todayAutomaticBackupName()));
 }
 
-function createAutomaticBackupIfMissing() {
+function getDropboxToken() {
+  return String(process.env.DROPBOX_ACCESS_TOKEN ?? "").trim();
+}
+
+function hasDropboxToken() {
+  return !!getDropboxToken();
+}
+
+function ensureDropboxConfigured() {
+  if (!hasDropboxToken()) {
+    throw new Error("DROPBOX_ACCESS_TOKEN non configurato.");
+  }
+}
+
+async function dropboxUpload(localFilePath: string, remoteFilename: string) {
+  ensureDropboxConfigured();
+
+  const token = getDropboxToken();
+  const fileBuffer = fs.readFileSync(localFilePath);
+  const dropboxPath = `${DROPBOX_BACKUP_DIR}/${remoteFilename}`;
+
+  const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/octet-stream",
+      "Dropbox-API-Arg": JSON.stringify({
+        path: dropboxPath,
+        mode: "overwrite",
+        autorename: false,
+        mute: true,
+        strict_conflict: false,
+      }),
+    },
+    body: fileBuffer,
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Errore upload Dropbox: ${txt || res.statusText}`);
+  }
+
+  return dropboxPath;
+}
+
+async function listDropboxBackups(): Promise<BackupRow[]> {
+  ensureDropboxConfigured();
+
+  const token = getDropboxToken();
+  const rows: BackupRow[] = [];
+  let cursor: string | null = null;
+  let hasMore = true;
+
+  while (hasMore) {
+    const url = cursor
+      ? "https://api.dropboxapi.com/2/files/list_folder/continue"
+      : "https://api.dropboxapi.com/2/files/list_folder";
+
+    const body = cursor
+      ? { cursor }
+      : {
+          path: DROPBOX_BACKUP_DIR,
+          recursive: false,
+          include_deleted: false,
+          include_has_explicit_shared_members: false,
+          include_mounted_folders: true,
+          include_non_downloadable_files: false,
+        };
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const txt = await res.text();
+
+      if (!cursor && txt.includes("path/not_found")) {
+        return [];
+      }
+
+      throw new Error(`Errore lista Dropbox: ${txt || res.statusText}`);
+    }
+
+    const json = (await res.json()) as {
+      entries?: Array<{
+        name?: string;
+        size?: number;
+        server_modified?: string;
+        ".tag"?: string;
+      }>;
+      has_more?: boolean;
+      cursor?: string;
+    };
+
+    for (const entry of json.entries ?? []) {
+      if (entry?.[".tag"] !== "file") continue;
+
+      const name = String(entry.name ?? "").trim();
+      if (!name.endsWith(".sql") || !name.startsWith("backup_")) continue;
+
+      const serverModified = String(entry.server_modified ?? "").trim();
+      const mtimeMs = serverModified ? new Date(serverModified).getTime() : Date.now();
+
+      rows.push({
+        name,
+        size: Number(entry.size ?? 0),
+        mtimeMs,
+        mtimeIso: new Date(mtimeMs).toISOString(),
+      });
+    }
+
+    hasMore = Boolean(json.has_more);
+    cursor = json.cursor ?? null;
+  }
+
+  return rows.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 20);
+}
+
+async function uploadToDropboxIfConfigured(localFilePath: string, filename: string) {
+  if (!hasDropboxToken()) return null;
+  await dropboxUpload(localFilePath, filename);
+  return filename;
+}
+
+async function createAutomaticBackupIfMissing() {
   ensureDir(BACKUP_DIR);
 
   if (hasAutomaticBackupForToday()) return null;
@@ -158,21 +296,15 @@ function createAutomaticBackupIfMissing() {
 
   runPgDump(fullPath);
   cleanupOld();
+  await uploadToDropboxIfConfigured(fullPath, filename);
 
   return filename;
 }
 
-export async function listBackups() {
-  requireAdmin();
-
-  if (isVercelRuntime()) {
-    return [];
-  }
-
+function listLocalBackups(): BackupRow[] {
   ensureDir(BACKUP_DIR);
-  createAutomaticBackupIfMissing();
 
-  const files = fs
+  return fs
     .readdirSync(BACKUP_DIR)
     .filter((f) => f.endsWith(".sql") && f.startsWith("backup_"))
     .map((f) => {
@@ -187,13 +319,29 @@ export async function listBackups() {
     })
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
     .slice(0, 20);
+}
 
-  return files;
+export async function listBackups() {
+  requireAdmin();
+
+  if (isVercelRuntime()) {
+    if (!hasDropboxToken()) return [];
+    return await listDropboxBackups();
+  }
+
+  await createAutomaticBackupIfMissing();
+  return listLocalBackups();
 }
 
 export async function backupNow() {
   requireAdmin();
-  ensureLocalBackupAllowed();
+
+  if (isVercelRuntime()) {
+    throw new Error(
+      "Backup manuale non disponibile su Vercel: pg_dump non è eseguibile nell'ambiente serverless. Esegui il backup da locale oppure usa un job esterno."
+    );
+  }
+
   ensureDir(BACKUP_DIR);
 
   const filename = `backup_manual_${stamp()}.sql`;
@@ -201,15 +349,27 @@ export async function backupNow() {
 
   runPgDump(fullPath);
   cleanupOld();
+  await uploadToDropboxIfConfigured(fullPath, filename);
 
   revalidatePath("/backup");
 
-  return { ok: true, filename };
+  return {
+    ok: true,
+    filename,
+    fullPath,
+    backupDir: BACKUP_DIR,
+  };
 }
 
 export async function restoreBackup(formData: FormData) {
   requireAdmin();
-  ensureLocalBackupAllowed();
+
+  if (isVercelRuntime()) {
+    throw new Error(
+      "Ripristino non disponibile da Vercel. Usa un restore manuale dal file .sql."
+    );
+  }
+
   ensureDir(BACKUP_DIR);
 
   const filename = String(formData.get("filename") ?? "").trim();
@@ -225,6 +385,6 @@ export async function restoreBackup(formData: FormData) {
   }
 
   throw new Error(
-    "Ripristino automatico PostgreSQL non abilitato da interfaccia. Usa il file .sql scaricato per il restore manuale."
+    "Ripristino automatico PostgreSQL non abilitato da interfaccia. Usa il file .sql per il restore manuale."
   );
 }

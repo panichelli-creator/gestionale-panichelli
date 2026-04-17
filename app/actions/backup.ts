@@ -9,12 +9,19 @@ import { getSession } from "@/lib/session";
 
 const KEEP_DAYS = 7;
 const DROPBOX_BACKUP_DIR = "/panichelli-backups";
+const DROPBOX_COMMANDS_DIR = `${DROPBOX_BACKUP_DIR}/_commands`;
 
 type BackupRow = {
   name: string;
   size: number;
   mtimeMs: number;
   mtimeIso: string;
+};
+
+type ActionResult = {
+  ok: boolean;
+  message: string;
+  filename?: string | null;
 };
 
 function requireAdmin() {
@@ -171,12 +178,10 @@ function ensureDropboxConfigured() {
   }
 }
 
-async function dropboxUpload(localFilePath: string, remoteFilename: string) {
+async function dropboxUploadBytes(bytes: Buffer, remotePath: string) {
   ensureDropboxConfigured();
 
   const token = getDropboxToken();
-  const fileBuffer = fs.readFileSync(localFilePath);
-  const dropboxPath = `${DROPBOX_BACKUP_DIR}/${remoteFilename}`;
 
   const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
     method: "POST",
@@ -184,21 +189,26 @@ async function dropboxUpload(localFilePath: string, remoteFilename: string) {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/octet-stream",
       "Dropbox-API-Arg": JSON.stringify({
-        path: dropboxPath,
+        path: remotePath,
         mode: "overwrite",
         autorename: false,
         mute: true,
         strict_conflict: false,
       }),
     },
-    body: fileBuffer,
+    body: bytes,
   });
 
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`Errore upload Dropbox: ${txt || res.statusText}`);
   }
+}
 
+async function dropboxUpload(localFilePath: string, remoteFilename: string) {
+  const fileBuffer = fs.readFileSync(localFilePath);
+  const dropboxPath = `${DROPBOX_BACKUP_DIR}/${remoteFilename}`;
+  await dropboxUploadBytes(fileBuffer, dropboxPath);
   return dropboxPath;
 }
 
@@ -277,7 +287,21 @@ async function listDropboxBackups(): Promise<BackupRow[]> {
     cursor = json.cursor ?? null;
   }
 
-  return rows.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 20);
+  return rows.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 50);
+}
+
+async function queueDropboxCommand(command: Record<string, any>) {
+  ensureDropboxConfigured();
+
+  const id = `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const remotePath = `${DROPBOX_COMMANDS_DIR}/${id}.json`;
+
+  await dropboxUploadBytes(
+    Buffer.from(JSON.stringify({ ...command, id }, null, 2), "utf8"),
+    remotePath
+  );
+
+  return id;
 }
 
 async function uploadToDropboxIfConfigured(localFilePath: string, filename: string) {
@@ -318,21 +342,19 @@ function listLocalBackups(): BackupRow[] {
       };
     })
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, 20);
+    .slice(0, 50);
 }
 
 export async function listBackups() {
   requireAdmin();
 
-  if (isVercelRuntime()) {
-    if (!hasDropboxToken()) return [];
-
+  if (hasDropboxToken()) {
     try {
       return await listDropboxBackups();
-    } catch {
-      return [];
-    }
+    } catch {}
   }
+
+  if (isVercelRuntime()) return [];
 
   try {
     await createAutomaticBackupIfMissing();
@@ -342,51 +364,59 @@ export async function listBackups() {
   }
 }
 
-export async function backupNow() {
+export async function backupNow(): Promise<ActionResult> {
   requireAdmin();
 
   if (isVercelRuntime()) {
-    return {
-      ok: false,
-      filename: null,
-      fullPath: null,
-      backupDir: null,
-      message:
-        "Backup manuale non disponibile su Vercel. Eseguilo dal PC locale con script/scheduler.",
-    };
+    try {
+      await queueDropboxCommand({
+        action: "CREATE_BACKUP",
+        createdAt: new Date().toISOString(),
+        source: "vercel",
+      });
+
+      revalidatePath("/backup");
+
+      return {
+        ok: true,
+        message:
+          "Richiesta backup inviata. Verrà eseguita dal PC locale appena legge il comando.",
+      };
+    } catch (e: any) {
+      return {
+        ok: false,
+        message: e?.message ?? "Errore invio richiesta backup.",
+      };
+    }
   }
 
-  ensureDir(BACKUP_DIR);
+  try {
+    ensureDir(BACKUP_DIR);
 
-  const filename = `backup_manual_${stamp()}.sql`;
-  const fullPath = path.join(BACKUP_DIR, filename);
+    const filename = `backup_manual_${stamp()}.sql`;
+    const fullPath = path.join(BACKUP_DIR, filename);
 
-  runPgDump(fullPath);
-  cleanupOld();
-  await uploadToDropboxIfConfigured(fullPath, filename);
+    runPgDump(fullPath);
+    cleanupOld();
+    await uploadToDropboxIfConfigured(fullPath, filename);
 
-  revalidatePath("/backup");
+    revalidatePath("/backup");
 
-  return {
-    ok: true,
-    filename,
-    fullPath,
-    backupDir: BACKUP_DIR,
-    message: "Backup creato correttamente.",
-  };
+    return {
+      ok: true,
+      filename,
+      message: "Backup creato correttamente.",
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      message: e?.message ?? "Errore backup.",
+    };
+  }
 }
 
-export async function restoreBackup(formData: FormData) {
+export async function restoreBackup(formData: FormData): Promise<ActionResult> {
   requireAdmin();
-
-  if (isVercelRuntime()) {
-    return {
-      ok: false,
-      message: "Ripristino non disponibile da Vercel. Usa restore manuale dal file .sql.",
-    };
-  }
-
-  ensureDir(BACKUP_DIR);
 
   const filename = String(formData.get("filename") ?? "").trim();
 
@@ -397,18 +427,35 @@ export async function restoreBackup(formData: FormData) {
     };
   }
 
-  const src = path.join(BACKUP_DIR, filename);
+  if (isVercelRuntime()) {
+    try {
+      await queueDropboxCommand({
+        action: "RESTORE_BACKUP",
+        filename,
+        createdAt: new Date().toISOString(),
+        source: "vercel",
+      });
 
-  if (!exists(src)) {
-    return {
-      ok: false,
-      message: "Backup non trovato.",
-    };
+      revalidatePath("/backup");
+
+      return {
+        ok: true,
+        filename,
+        message:
+          "Richiesta ripristino inviata. Verrà eseguita dal PC locale appena legge il comando.",
+      };
+    } catch (e: any) {
+      return {
+        ok: false,
+        message: e?.message ?? "Errore invio richiesta ripristino.",
+      };
+    }
   }
 
   return {
     ok: false,
+    filename,
     message:
-      "Ripristino automatico PostgreSQL non abilitato da interfaccia. Usa il file .sql per restore manuale.",
+      "Ripristino automatico da interfaccia non abilitato in locale. Usa restore manuale del file .sql.",
   };
 }

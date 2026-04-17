@@ -326,20 +326,34 @@ export async function listBackups() {
 
   if (isVercelRuntime()) {
     if (!hasDropboxToken()) return [];
-    return await listDropboxBackups();
+
+    try {
+      return await listDropboxBackups();
+    } catch {
+      return [];
+    }
   }
 
-  await createAutomaticBackupIfMissing();
-  return listLocalBackups();
+  try {
+    await createAutomaticBackupIfMissing();
+    return listLocalBackups();
+  } catch {
+    return [];
+  }
 }
 
 export async function backupNow() {
   requireAdmin();
 
   if (isVercelRuntime()) {
-    throw new Error(
-      "Backup manuale non disponibile su Vercel: pg_dump non è eseguibile nell'ambiente serverless. Esegui il backup da locale oppure usa un job esterno."
-    );
+    return {
+      ok: false,
+      filename: null,
+      fullPath: null,
+      backupDir: null,
+      message:
+        "Backup manuale non disponibile su Vercel. Eseguilo dal PC locale con script/scheduler.",
+    };
   }
 
   ensureDir(BACKUP_DIR);
@@ -358,6 +372,7 @@ export async function backupNow() {
     filename,
     fullPath,
     backupDir: BACKUP_DIR,
+    message: "Backup creato correttamente.",
   };
 }
 
@@ -365,9 +380,10 @@ export async function restoreBackup(formData: FormData) {
   requireAdmin();
 
   if (isVercelRuntime()) {
-    throw new Error(
-      "Ripristino non disponibile da Vercel. Usa un restore manuale dal file .sql."
-    );
+    return {
+      ok: false,
+      message: "Ripristino non disponibile da Vercel. Usa restore manuale dal file .sql.",
+    };
   }
 
   ensureDir(BACKUP_DIR);
@@ -375,16 +391,24 @@ export async function restoreBackup(formData: FormData) {
   const filename = String(formData.get("filename") ?? "").trim();
 
   if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
-    throw new Error("Nome file non valido.");
+    return {
+      ok: false,
+      message: "Nome file non valido.",
+    };
   }
 
   const src = path.join(BACKUP_DIR, filename);
 
   if (!exists(src)) {
-    throw new Error("Backup non trovato.");
+    return {
+      ok: false,
+      message: "Backup non trovato.",
+    };
   }
 
-  throw new Error(
-    "Ripristino automatico PostgreSQL non abilitato da interfaccia. Usa il file .sql per il restore manuale."
-  );
+  return {
+    ok: false,
+    message:
+      "Ripristino automatico PostgreSQL non abilitato da interfaccia. Usa il file .sql per restore manuale.",
+  };
 }

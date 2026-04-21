@@ -12,6 +12,27 @@ type SP = {
   err?: string;
 };
 
+function splitFullName(raw: string) {
+  const full = String(raw ?? "").trim().replace(/\s+/g, " ");
+  if (!full) {
+    return { firstName: "", lastName: "" };
+  }
+
+  const parts = full.split(" ").filter(Boolean);
+
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: parts[0] };
+  }
+
+  const firstName = parts.slice(0, -1).join(" ").trim();
+  const lastName = parts.slice(-1).join(" ").trim();
+
+  return {
+    firstName: firstName || lastName,
+    lastName: lastName || firstName,
+  };
+}
+
 export default async function ImportExportPage({
   searchParams,
 }: {
@@ -100,6 +121,7 @@ export default async function ImportExportPage({
                 city: r.Città ? String(r.Città) : null,
                 province: r.Provincia ? String(r.Provincia) : null,
                 cap: r.CAP ? String(r.CAP) : null,
+                notes: r.Note ? String(r.Note) : null,
               },
             });
 
@@ -116,27 +138,63 @@ export default async function ImportExportPage({
 
         for (const r of rows) {
           try {
-            const name = String(r.Nome ?? "").trim();
-            if (!name) continue;
+            const firstNameRaw = String(r.Nome ?? r.FirstName ?? "").trim();
+            const lastNameRaw = String(r.Cognome ?? r.LastName ?? "").trim();
+            const fullNameRaw = String(r.Nominativo ?? r["Nome Completo"] ?? "").trim();
+
+            let firstName = firstNameRaw;
+            let lastName = lastNameRaw;
+
+            if (!firstName || !lastName) {
+              const split = splitFullName(fullNameRaw || firstNameRaw || lastNameRaw);
+              if (!firstName) firstName = split.firstName;
+              if (!lastName) lastName = split.lastName;
+            }
+
+            if (!firstName || !lastName) {
+              errori.push(`PERSONA senza nome/cognome validi: ${JSON.stringify(r)}`);
+              continue;
+            }
+
+            const clientName = String(r.Cliente ?? "").trim();
+            let clientId: string | null = null;
+
+            if (clientName) {
+              const client = await prisma.client.findFirst({
+                where: { name: clientName },
+              });
+
+              if (client) {
+                clientId = client.id;
+              } else {
+                errori.push(`PERSONA ${firstName} ${lastName}: cliente non trovato (${clientName})`);
+              }
+            }
 
             await prisma.person.create({
               data: {
-                name,
+                firstName,
+                lastName,
                 email: r.Email ? String(r.Email) : null,
                 phone: r.Telefono ? String(r.Telefono) : null,
-                notes: r.Note ? String(r.Note) : null,
+                role: r.Ruolo ? String(r.Ruolo) : null,
+                fiscalCode: r.CodiceFiscale ? String(r.CodiceFiscale) : null,
+                clientId,
               },
             });
 
             persone++;
           } catch (e: any) {
-            errori.push(`PERSONA ${String(r.Nome ?? "")}: ${e?.message ?? "Errore"}`);
+            errori.push(
+              `PERSONA ${String(r.Nominativo ?? r.Nome ?? "")}: ${e?.message ?? "Errore"}`
+            );
           }
         }
       }
 
       revalidatePath("/import-export");
       revalidatePath("/people");
+      revalidatePath("/clients");
 
       const msgBase = `Import completato: ${clienti} clienti, ${sedi} sedi, ${persone} persone`;
       const msg =

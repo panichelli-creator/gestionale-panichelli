@@ -12,8 +12,46 @@ type SP = {
   err?: string;
 };
 
+const OLD_COURSE_SHEETS = new Set([
+  "ANTINCENDIO ALTO",
+  "ANTINCENDIO BASSO",
+  "ANTINCENDIO MEDIO",
+  "BLSD",
+  "GENERALE",
+  "PREPOSTI",
+  "PRIMO SOCCORSO GRUPPO A",
+  "PRIMO SOCCORSO GRUPPO BC",
+  "RLS MENO DI 50 DIP",
+  "RLS PIU' DI 50 DIP",
+  "RSPP DATORE DI LAVORO",
+  "SPEC. ALTO",
+  "SPEC. BASSO",
+  "SPEC. MEDIO",
+]);
+
+function norm(v: unknown) {
+  return String(v ?? "").trim();
+}
+
+function upper(v: unknown) {
+  return norm(v).toUpperCase();
+}
+
+function emptyToNull(v: unknown) {
+  const s = norm(v);
+  if (!s) return null;
+  if (["NULL", "N/D", "ND", "-", "--"].includes(s.toUpperCase())) return null;
+  return s;
+}
+
+function parseBoolLoose(v: unknown) {
+  const s = upper(v);
+  if (!s) return false;
+  return ["SI", "SÌ", "YES", "TRUE", "1", "OK", "X"].includes(s);
+}
+
 function splitFullName(raw: string) {
-  const full = String(raw ?? "").trim().replace(/\s+/g, " ");
+  const full = norm(raw).replace(/\s+/g, " ");
   if (!full) {
     return { firstName: "", lastName: "" };
   }
@@ -31,6 +69,49 @@ function splitFullName(raw: string) {
     firstName: firstName || lastName,
     lastName: lastName || firstName,
   };
+}
+
+function parseDateLoose(v: unknown): Date | null {
+  const s = norm(v);
+  if (!s) return null;
+
+  if (
+    s === "00-00-00" ||
+    s === "0000-00-00" ||
+    s === "00/00/00" ||
+    s === "00/00/0000"
+  ) {
+    return null;
+  }
+
+  const ddmmyyyy = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (ddmmyyyy) {
+    const [, dd, mm, yyyy] = ddmmyyyy;
+    const d = new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const ddmmyy = s.match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
+  if (ddmmyy) {
+    const [, dd, mm, yy] = ddmmyy;
+    const yyyy = Number(yy) >= 70 ? `19${yy}` : `20${yy}`;
+    const d = new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) {
+    const d = new Date(`${s}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const direct = new Date(s);
+  return Number.isNaN(direct.getTime()) ? null : direct;
+}
+
+function cleanFiscalCode(v: unknown) {
+  const s = norm(v).replace(/\s+/g, "").toUpperCase();
+  return s || null;
 }
 
 export default async function ImportExportPage({
@@ -53,7 +134,10 @@ export default async function ImportExportPage({
       }
 
       if (!file.name?.toLowerCase().endsWith(".xlsx")) {
-        redirect("/import-export?err=" + encodeURIComponent("Seleziona un file .xlsx"));
+        redirect(
+          "/import-export?err=" +
+            encodeURIComponent("Seleziona un file .xlsx")
+        );
       }
 
       const buffer = Buffer.from(await file.arrayBuffer());
@@ -65,128 +149,500 @@ export default async function ImportExportPage({
 
       let clienti = 0;
       let sedi = 0;
-      let persone = 0;
+      let personeCreate = 0;
+      let personeUpdate = 0;
+      let corsi = 0;
+      let formazioneCreate = 0;
+      let formazioneUpdate = 0;
+
       const errori: string[] = [];
+
+      async function getOrCreateClientByName(nameRaw: unknown) {
+        const name = norm(nameRaw);
+        if (!name) return null;
+
+        const existing = await prisma.client.findUnique({
+          where: { name },
+        });
+
+        if (existing) return existing;
+
+        const created = await prisma.client.create({
+          data: { name },
+        });
+
+        clienti++;
+        return created;
+      }
+
+      async function getOrCreateCourseByName(nameRaw: unknown) {
+        const name = norm(nameRaw);
+        if (!name) return null;
+
+        const existing = await prisma.courseCatalog.findUnique({
+          where: { name },
+        });
+
+        if (existing) return existing;
+
+        const created = await prisma.courseCatalog.create({
+          data: { name },
+        });
+
+        corsi++;
+        return created;
+      }
+
+      async function findExistingPerson(params: {
+        fiscalCode?: string | null;
+        firstName: string;
+        lastName: string;
+        clientId?: string | null;
+      }) {
+        if (params.fiscalCode) {
+          const byCf = await prisma.person.findUnique({
+            where: { fiscalCode: params.fiscalCode },
+          });
+          if (byCf) return byCf;
+        }
+
+        const byName = await prisma.person.findFirst({
+          where: {
+            firstName: params.firstName,
+            lastName: params.lastName,
+            ...(params.clientId ? { clientId: params.clientId } : {}),
+          },
+          orderBy: { createdAt: "asc" },
+        });
+
+        if (byName) return byName;
+
+        if (!params.clientId) {
+          return prisma.person.findFirst({
+            where: {
+              firstName: params.firstName,
+              lastName: params.lastName,
+            },
+            orderBy: { createdAt: "asc" },
+          });
+        }
+
+        return null;
+      }
+
+      async function upsertPersonFromRow(
+        r: any,
+        opts?: {
+          clientFieldNames?: string[];
+          firstNameFieldNames?: string[];
+          lastNameFieldNames?: string[];
+          roleFieldNames?: string[];
+          emailFieldNames?: string[];
+          phoneFieldNames?: string[];
+          fiscalCodeFieldNames?: string[];
+          hireDateFieldNames?: string[];
+          medicalFieldNames?: string[];
+        }
+      ) {
+        const clientFieldNames = opts?.clientFieldNames ?? [
+          "Cliente",
+          "ClienteNome",
+          "ClientePrincipaleNome",
+          "Azienda",
+        ];
+        const firstNameFieldNames = opts?.firstNameFieldNames ?? ["Nome"];
+        const lastNameFieldNames = opts?.lastNameFieldNames ?? ["Cognome"];
+        const roleFieldNames = opts?.roleFieldNames ?? ["Ruolo", "Mansione", "mansione"];
+        const emailFieldNames = opts?.emailFieldNames ?? ["Email", "email"];
+        const phoneFieldNames = opts?.phoneFieldNames ?? ["Telefono", "telefono"];
+        const fiscalCodeFieldNames = opts?.fiscalCodeFieldNames ?? [
+          "CodiceFiscale",
+          "codice fiscale",
+        ];
+        const hireDateFieldNames = opts?.hireDateFieldNames ?? [
+          "DataAssunzione",
+          "data assunzione",
+        ];
+        const medicalFieldNames = opts?.medicalFieldNames ?? [
+          "VisitaMedica",
+          "giudizio di idoneita'",
+        ];
+
+        const pick = (names: string[]) => {
+          for (const key of names) {
+            if (r[key] != null && norm(r[key])) return r[key];
+          }
+          return null;
+        };
+
+        const firstNameRaw = norm(pick(firstNameFieldNames));
+        const lastNameRaw = norm(pick(lastNameFieldNames));
+        const fullNameRaw = norm(r.Nominativo ?? r["Nome Completo"] ?? "");
+
+        let firstName = firstNameRaw;
+        let lastName = lastNameRaw;
+
+        if (!firstName || !lastName) {
+          const split = splitFullName(fullNameRaw || `${firstNameRaw} ${lastNameRaw}`.trim());
+          if (!firstName) firstName = split.firstName;
+          if (!lastName) lastName = split.lastName;
+        }
+
+        if (!firstName || !lastName) {
+          throw new Error("Nome/Cognome mancanti");
+        }
+
+        const clientName = norm(pick(clientFieldNames));
+        const client = clientName ? await getOrCreateClientByName(clientName) : null;
+
+        const fiscalCode = cleanFiscalCode(pick(fiscalCodeFieldNames));
+        const email = emptyToNull(pick(emailFieldNames));
+        const phone = emptyToNull(pick(phoneFieldNames));
+        const role = emptyToNull(pick(roleFieldNames));
+        const hireDate = parseDateLoose(pick(hireDateFieldNames));
+
+        let medicalCheckDone = false;
+        const medicalRaw = pick(medicalFieldNames);
+        if (medicalRaw != null) {
+          const s = upper(medicalRaw);
+          medicalCheckDone =
+            !["", "NO", "NESSUNA VISITA", "NON FATTA", "FALSE", "0"].includes(s);
+        }
+
+        const existing = await findExistingPerson({
+          fiscalCode,
+          firstName,
+          lastName,
+          clientId: client?.id ?? null,
+        });
+
+        if (existing) {
+          await prisma.person.update({
+            where: { id: existing.id },
+            data: {
+              firstName,
+              lastName,
+              email: existing.email || email ? email ?? existing.email : null,
+              phone: existing.phone || phone ? phone ?? existing.phone : null,
+              role: existing.role || role ? role ?? existing.role : null,
+              fiscalCode: existing.fiscalCode || fiscalCode ? fiscalCode ?? existing.fiscalCode : null,
+              clientId: existing.clientId ?? client?.id ?? null,
+              hireDate: existing.hireDate ?? hireDate ?? null,
+              medicalCheckDone: existing.medicalCheckDone || medicalCheckDone,
+            },
+          });
+
+          personeUpdate++;
+          return await prisma.person.findUnique({ where: { id: existing.id } });
+        }
+
+        const created = await prisma.person.create({
+          data: {
+            firstName,
+            lastName,
+            email,
+            phone,
+            role,
+            fiscalCode,
+            clientId: client?.id ?? null,
+            hireDate,
+            medicalCheckDone,
+          },
+        });
+
+        personeCreate++;
+        return created;
+      }
+
+      async function upsertTrainingRecord(args: {
+        personId: string;
+        courseName: string;
+        performedAt?: Date | null;
+        dueDate?: Date | null;
+        status?: string | null;
+        notes?: string | null;
+      }) {
+        const course = await getOrCreateCourseByName(args.courseName);
+        if (!course) throw new Error("Corso mancante");
+
+        const existing = await prisma.trainingRecord.findUnique({
+          where: {
+            personId_courseId: {
+              personId: args.personId,
+              courseId: course.id,
+            },
+          },
+        });
+
+        if (existing) {
+          await prisma.trainingRecord.update({
+            where: {
+              personId_courseId: {
+                personId: args.personId,
+                courseId: course.id,
+              },
+            },
+            data: {
+              performedAt: args.performedAt ?? existing.performedAt,
+              dueDate: args.dueDate ?? existing.dueDate,
+              status: args.status || existing.status,
+              notes: args.notes || existing.notes,
+            },
+          });
+
+          formazioneUpdate++;
+          return;
+        }
+
+        await prisma.trainingRecord.create({
+          data: {
+            personId: args.personId,
+            courseId: course.id,
+            performedAt: args.performedAt ?? null,
+            dueDate: args.dueDate ?? null,
+            status: args.status || "DA_FARE",
+            notes: args.notes || null,
+          },
+        });
+
+        formazioneCreate++;
+      }
 
       // ===== CLIENTI =====
       if (workbook.Sheets["CLIENTI"]) {
-        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["CLIENTI"]);
+        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["CLIENTI"], { defval: "" });
 
         for (const r of rows) {
           try {
-            const name = String(r.Nome ?? "").trim();
+            const name = norm(r.Nome);
             if (!name) continue;
 
-            await prisma.client.create({
-              data: {
-                name,
-                email: r.Email ? String(r.Email) : null,
-                phone: r.Telefono ? String(r.Telefono) : null,
-                vatNumber: r.PIVA ? String(r.PIVA) : null,
-                address: r.Indirizzo ? String(r.Indirizzo) : null,
-                notes: r.Note ? String(r.Note) : null,
-              },
+            const existing = await prisma.client.findUnique({
+              where: { name },
             });
 
-            clienti++;
+            if (existing) {
+              await prisma.client.update({
+                where: { id: existing.id },
+                data: {
+                  type: norm(r.Tipo) || existing.type,
+                  status: norm(r.Stato) || existing.status,
+                  email: existing.email ?? emptyToNull(r.Email),
+                  phone: existing.phone ?? emptyToNull(r.Telefono),
+                  pec: existing.pec ?? emptyToNull(r.PEC),
+                  vatNumber: existing.vatNumber ?? emptyToNull(r.PIVA),
+                  uniqueCode: existing.uniqueCode ?? emptyToNull(r.CodiceUnivoco),
+                  legalSeat: existing.legalSeat ?? emptyToNull(r.SedeLegale),
+                  operativeSeat: existing.operativeSeat ?? emptyToNull(r.SedeOperativa),
+                  address: existing.address ?? emptyToNull(r.Indirizzo),
+                  occupationalDoctorName:
+                    existing.occupationalDoctorName ?? emptyToNull(r.MedicoLavoro),
+                  notes: existing.notes ?? emptyToNull(r.Note),
+                },
+              });
+            } else {
+              await prisma.client.create({
+                data: {
+                  name,
+                  type: norm(r.Tipo) || "ALTRO",
+                  status: norm(r.Stato) || "ATTIVO",
+                  email: emptyToNull(r.Email),
+                  phone: emptyToNull(r.Telefono),
+                  pec: emptyToNull(r.PEC),
+                  vatNumber: emptyToNull(r.PIVA),
+                  uniqueCode: emptyToNull(r.CodiceUnivoco),
+                  legalSeat: emptyToNull(r.SedeLegale),
+                  operativeSeat: emptyToNull(r.SedeOperativa),
+                  address: emptyToNull(r.Indirizzo),
+                  occupationalDoctorName: emptyToNull(r.MedicoLavoro),
+                  notes: emptyToNull(r.Note),
+                },
+              });
+
+              clienti++;
+            }
           } catch (e: any) {
-            errori.push(`CLIENTE ${String(r.Nome ?? "")}: ${e?.message ?? "Errore"}`);
+            errori.push(`CLIENTE ${norm(r.Nome)}: ${e?.message ?? "Errore"}`);
           }
         }
       }
 
       // ===== SEDI =====
       if (workbook.Sheets["SEDI"]) {
-        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["SEDI"]);
+        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["SEDI"], { defval: "" });
 
         for (const r of rows) {
           try {
-            const clientName = String(r.Cliente ?? "").trim();
+            const clientName =
+              norm(r.ClienteNome) ||
+              norm(r.Cliente) ||
+              norm(r.Azienda);
+
             if (!clientName) continue;
 
-            const client = await prisma.client.findFirst({
-              where: { name: clientName },
+            const client = await getOrCreateClientByName(clientName);
+            if (!client) throw new Error("Cliente non trovato");
+
+            const siteName = norm(r.NomeSede) || "Sede";
+
+            const existing = await prisma.clientSite.findFirst({
+              where: {
+                clientId: client.id,
+                name: siteName,
+              },
             });
 
-            if (!client) {
-              errori.push(`Cliente non trovato: ${clientName}`);
-              continue;
-            }
+            if (existing) continue;
 
             await prisma.clientSite.create({
               data: {
                 clientId: client.id,
-                name: String(r.NomeSede ?? "").trim() || "Sede",
-                address: r.Indirizzo ? String(r.Indirizzo) : null,
-                city: r.Città ? String(r.Città) : null,
-                province: r.Provincia ? String(r.Provincia) : null,
-                cap: r.CAP ? String(r.CAP) : null,
-                notes: r.Note ? String(r.Note) : null,
+                name: siteName,
+                address: emptyToNull(r.Indirizzo),
+                city: emptyToNull(r.Città ?? r.Citta),
+                province: emptyToNull(r.Provincia),
+                cap: emptyToNull(r.CAP),
+                notes: emptyToNull(r.Note),
               },
             });
 
             sedi++;
           } catch (e: any) {
-            errori.push(`SEDE ${String(r.NomeSede ?? "")}: ${e?.message ?? "Errore"}`);
+            errori.push(`SEDE ${norm(r.NomeSede)}: ${e?.message ?? "Errore"}`);
           }
         }
       }
 
-      // ===== PERSONE =====
+      // ===== PERSONE (template) =====
       if (workbook.Sheets["PERSONE"]) {
-        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["PERSONE"]);
+        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["PERSONE"], { defval: "" });
 
         for (const r of rows) {
           try {
-            const firstNameRaw = String(r.Nome ?? r.FirstName ?? "").trim();
-            const lastNameRaw = String(r.Cognome ?? r.LastName ?? "").trim();
-            const fullNameRaw = String(r.Nominativo ?? r["Nome Completo"] ?? "").trim();
+            await upsertPersonFromRow(r, {
+              clientFieldNames: ["ClientePrincipaleNome", "ClienteNome", "Cliente", "Azienda"],
+              firstNameFieldNames: ["Nome"],
+              lastNameFieldNames: ["Cognome"],
+              roleFieldNames: ["Mansione", "Ruolo"],
+              emailFieldNames: ["Email"],
+              phoneFieldNames: ["Telefono"],
+              fiscalCodeFieldNames: ["CodiceFiscale"],
+              hireDateFieldNames: ["DataAssunzione"],
+              medicalFieldNames: ["VisitaMedica"],
+            });
+          } catch (e: any) {
+            errori.push(`PERSONE ${norm(r.Cognome)} ${norm(r.Nome)}: ${e?.message ?? "Errore"}`);
+          }
+        }
+      }
 
-            let firstName = firstNameRaw;
-            let lastName = lastNameRaw;
+      // ===== PERSONALE (vecchio gestionale) =====
+      if (workbook.Sheets["PERSONALE"]) {
+        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["PERSONALE"], { defval: "" });
 
-            if (!firstName || !lastName) {
-              const split = splitFullName(fullNameRaw || firstNameRaw || lastNameRaw);
-              if (!firstName) firstName = split.firstName;
-              if (!lastName) lastName = split.lastName;
-            }
+        for (const r of rows) {
+          try {
+            await upsertPersonFromRow(r, {
+              clientFieldNames: ["Azienda"],
+              firstNameFieldNames: ["nome"],
+              lastNameFieldNames: ["cognome"],
+              roleFieldNames: ["mansione"],
+              emailFieldNames: ["email"],
+              phoneFieldNames: ["telefono"],
+              fiscalCodeFieldNames: ["codice fiscale"],
+              hireDateFieldNames: ["data assunzione"],
+              medicalFieldNames: ["giudizio di idoneita'"],
+            });
+          } catch (e: any) {
+            errori.push(`PERSONALE ${norm(r.cognome)} ${norm(r.nome)}: ${e?.message ?? "Errore"}`);
+          }
+        }
+      }
 
-            if (!firstName || !lastName) {
-              errori.push(`PERSONA senza nome/cognome validi: ${JSON.stringify(r)}`);
-              continue;
-            }
+      // ===== FORMAZIONE (template) =====
+      if (workbook.Sheets["FORMAZIONE"]) {
+        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["FORMAZIONE"], { defval: "" });
 
-            const clientName = String(r.Cliente ?? "").trim();
-            let clientId: string | null = null;
+        for (const r of rows) {
+          try {
+            let person = null as any;
 
-            if (clientName) {
-              const client = await prisma.client.findFirst({
-                where: { name: clientName },
+            const fiscalCode = cleanFiscalCode(r.CodiceFiscale);
+            if (fiscalCode) {
+              person = await prisma.person.findUnique({
+                where: { fiscalCode },
               });
+            }
 
-              if (client) {
-                clientId = client.id;
-              } else {
-                errori.push(`PERSONA ${firstName} ${lastName}: cliente non trovato (${clientName})`);
+            if (!person) {
+              const fullName = norm(r.Persona);
+              const split = splitFullName(fullName);
+              if (split.firstName && split.lastName) {
+                person = await prisma.person.findFirst({
+                  where: {
+                    firstName: split.firstName,
+                    lastName: split.lastName,
+                  },
+                });
               }
             }
 
-            await prisma.person.create({
-              data: {
-                firstName,
-                lastName,
-                email: r.Email ? String(r.Email) : null,
-                phone: r.Telefono ? String(r.Telefono) : null,
-                role: r.Ruolo ? String(r.Ruolo) : null,
-                fiscalCode: r.CodiceFiscale ? String(r.CodiceFiscale) : null,
-                clientId,
-              },
-            });
+            if (!person) {
+              throw new Error("Persona non trovata");
+            }
 
-            persone++;
+            const courseName = norm(r.Corso);
+            if (!courseName) throw new Error("Corso mancante");
+
+            await upsertTrainingRecord({
+              personId: person.id,
+              courseName,
+              performedAt: parseDateLoose(r.DataUltima),
+              dueDate: parseDateLoose(r.DataScadenza),
+              status: emptyToNull(r.Stato),
+              notes: emptyToNull(r.Note),
+            });
           } catch (e: any) {
             errori.push(
-              `PERSONA ${String(r.Nominativo ?? r.Nome ?? "")}: ${e?.message ?? "Errore"}`
+              `FORMAZIONE ${norm(r.Persona)} / ${norm(r.Corso)}: ${e?.message ?? "Errore"}`
+            );
+          }
+        }
+      }
+
+      // ===== FOGLI CORSI VECCHIO GESTIONALE =====
+      for (const sheetName of workbook.SheetNames) {
+        if (!OLD_COURSE_SHEETS.has(sheetName.toUpperCase())) continue;
+
+        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets[sheetName], { defval: "" });
+
+        for (const r of rows) {
+          try {
+            const person = await upsertPersonFromRow(r, {
+              clientFieldNames: ["Azienda"],
+              firstNameFieldNames: ["nome"],
+              lastNameFieldNames: ["cognome"],
+              roleFieldNames: ["mansione"],
+              emailFieldNames: ["email"],
+              phoneFieldNames: [],
+              fiscalCodeFieldNames: ["codice fiscale"],
+              hireDateFieldNames: ["data assunzione"],
+              medicalFieldNames: [],
+            });
+
+            if (!person) throw new Error("Persona non trovata/creata");
+
+            await upsertTrainingRecord({
+              personId: person.id,
+              courseName: sheetName,
+              performedAt: parseDateLoose(r["data consegna"]),
+              dueDate: parseDateLoose(r["data scadenza"]),
+              status: emptyToNull(r["stato item"]),
+              notes: emptyToNull(r.nota),
+            });
+          } catch (e: any) {
+            errori.push(
+              `${sheetName} ${norm(r.cognome)} ${norm(r.nome)}: ${e?.message ?? "Errore"}`
             );
           }
         }
@@ -195,11 +651,17 @@ export default async function ImportExportPage({
       revalidatePath("/import-export");
       revalidatePath("/people");
       revalidatePath("/clients");
+      revalidatePath("/training");
 
-      const msgBase = `Import completato: ${clienti} clienti, ${sedi} sedi, ${persone} persone`;
+      const msgBase =
+        `Import completato: ${clienti} clienti nuovi, ${sedi} sedi nuove, ` +
+        `${personeCreate} persone create, ${personeUpdate} persone aggiornate, ` +
+        `${corsi} corsi nuovi, ${formazioneCreate} record formazione creati, ` +
+        `${formazioneUpdate} record formazione aggiornati`;
+
       const msg =
         errori.length > 0
-          ? `${msgBase}. Errori: ${errori.slice(0, 10).join(" | ")}`
+          ? `${msgBase}. Errori: ${errori.slice(0, 12).join(" | ")}`
           : msgBase;
 
       redirect("/import-export?ok=" + encodeURIComponent(msg));
@@ -238,9 +700,11 @@ export default async function ImportExportPage({
         <h2>Import Excel Unico (.xlsx)</h2>
 
         <div className="muted" style={{ marginTop: 6 }}>
-          Usa il template Excel unico e poi carica il file compilato.
+          Carica un file Excel unico.
           <br />
-          Fogli supportati: CLIENTI, SEDI, PERSONE. Se mancano, non dà errore.
+          Supporta sia i fogli del tuo template sia i fogli corsi del vecchio gestionale.
+          <br />
+          Per il vecchio gestionale: metti ogni CSV in un foglio separato dello stesso file .xlsx.
         </div>
 
         {ok ? (

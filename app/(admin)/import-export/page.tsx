@@ -180,6 +180,8 @@ export default async function ImportExportPage({
         <h2>Import Excel Unico (.xlsx)</h2>
 
         <div className="muted" style={{ marginTop: 6 }}>
+          Usa il template Excel unico e poi carica il file compilato.
+          <br />
           Fogli supportati: CLIENTI, SEDI, PERSONE. Se mancano, non dà errore.
         </div>
 
@@ -211,7 +213,7 @@ export default async function ImportExportPage({
 
         <form action={importExcelAction} className="card" style={{ marginTop: 12 }}>
           <div>
-            <label htmlFor="file">File Excel</label>
+            <label htmlFor="file">File Excel unico</label>
             <input
               id="file"
               className="input"

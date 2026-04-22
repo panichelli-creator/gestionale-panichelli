@@ -690,6 +690,10 @@ export default async function ImportExportPage({
 
       redirect("/import-export?ok=" + encodeURIComponent(msg));
     } catch (e: any) {
+      if (typeof e?.digest === "string" && e.digest.startsWith("NEXT_REDIRECT")) {
+        throw e;
+      }
+
       redirect(
         "/import-export?err=" +
           encodeURIComponent(e?.message ?? "Errore durante import")

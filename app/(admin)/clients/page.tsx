@@ -95,7 +95,12 @@ export default async function ClientsPage({ searchParams }: { searchParams: SP }
   const dir = normDir(searchParams.dir);
 
   const where: any = {};
-  if (q) where.name = { contains: q };
+  if (q) {
+    where.name = {
+      contains: q,
+      mode: "insensitive",
+    };
+  }
   if (type !== "TUTTE") where.type = type;
   if (status !== "TUTTI") where.status = status;
 

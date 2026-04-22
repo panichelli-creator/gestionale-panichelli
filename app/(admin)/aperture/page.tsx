@@ -9,7 +9,11 @@ type SP = {
   year?: string;
   clientId?: string;
   onlyAperture?: string;
+  sort?: string;
+  dir?: string;
 };
+
+type SortKey = "client" | "practice" | "date" | "status";
 
 function fmt(d: Date | null | undefined) {
   return d ? new Date(d).toLocaleDateString("it-IT") : "—";
@@ -139,41 +143,36 @@ function billingStatusStyle(v: string | null | undefined) {
 function getBillingSummary(p: any) {
   const steps = Array.isArray(p?.billingSteps) ? p.billingSteps : [];
 
-  const total = steps.reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
-  const daInviare = steps.filter(
-    (row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURA_DA_INVIARE"
-  ).length;
   const fatturato = steps
     .filter((row: any) =>
       ["FATTURATA", "INCASSATA"].includes(String(row?.billingStatus ?? "").trim().toUpperCase())
     )
     .reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
+
   const incassato = steps
     .filter((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "INCASSATA")
     .reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
 
-  let mainStatus = "—";
+  const normalizedSteps = steps.map((row: any) => ({
+    ...row,
+    billingStatusUpper: String(row?.billingStatus ?? "").trim().toUpperCase(),
+    triggerStatusUpper: String(row?.triggerStatus ?? "").trim().toUpperCase(),
+  }));
 
-  if (
-    steps.length > 0 &&
-    steps.every((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "INCASSATA")
-  ) {
-    mainStatus = "INCASSATA";
-  } else if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURATA")) {
-    mainStatus = "FATTURATA";
-  } else if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURA_DA_INVIARE")) {
-    mainStatus = "FATTURA_DA_INVIARE";
-  } else if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "DA_FATTURARE")) {
-    mainStatus = "DA_FATTURARE";
-  }
+  const activeStep =
+    normalizedSteps.find(
+      (row: any) => !["FATTURATA", "INCASSATA"].includes(row.billingStatusUpper)
+    ) ??
+    normalizedSteps.find((row: any) => row.billingStatusUpper === "FATTURATA") ??
+    normalizedSteps.find((row: any) => row.billingStatusUpper === "INCASSATA") ??
+    null;
 
   return {
-    total,
-    daInviare,
     fatturato,
     incassato,
     count: steps.length,
-    mainStatus,
+    activeTriggerStatus: activeStep?.triggerStatusUpper || "",
+    activeBillingStatus: activeStep?.billingStatusUpper || "—",
   };
 }
 
@@ -199,6 +198,19 @@ function getPracticeAmount(p: any) {
   return 0;
 }
 
+function normSort(v: any): SortKey {
+  const s = String(v ?? "").toLowerCase();
+  if (s === "client") return "client";
+  if (s === "practice") return "practice";
+  if (s === "date") return "date";
+  if (s === "status") return "status";
+  return "date";
+}
+
+function normDir(v: any): "asc" | "desc" {
+  return String(v ?? "").toLowerCase() === "asc" ? "asc" : "desc";
+}
+
 export default async function AperturePage({
   searchParams,
 }: {
@@ -211,6 +223,8 @@ export default async function AperturePage({
   const year = String(searchParams?.year ?? "").trim();
   const clientId = String(searchParams?.clientId ?? "").trim();
   const onlyAperture = String(searchParams?.onlyAperture ?? "SI").trim();
+  const sort = normSort(searchParams?.sort);
+  const dir = normDir(searchParams?.dir);
 
   const where: any = {};
 
@@ -251,7 +265,7 @@ export default async function AperturePage({
     }
   }
 
-  const [rows, clients] = await Promise.all([
+  const [rawRows, clients] = await Promise.all([
     prisma.clientPractice.findMany({
       where,
       include: {
@@ -260,7 +274,6 @@ export default async function AperturePage({
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         },
       },
-      orderBy: [{ inApertureList: "desc" }, { practiceDate: "desc" }, { createdAt: "desc" }],
       take: 2000,
     }),
     prisma.client.findMany({
@@ -269,6 +282,38 @@ export default async function AperturePage({
       select: { id: true, name: true },
     }),
   ]);
+
+  const rows = [...rawRows].sort((a: any, b: any) => {
+    const aConcluso = normalizePracticeStatus(a.apertureStatus) === "CONCLUSO" ? 1 : 0;
+    const bConcluso = normalizePracticeStatus(b.apertureStatus) === "CONCLUSO" ? 1 : 0;
+    if (aConcluso !== bConcluso) return aConcluso - bConcluso;
+
+    let cmp = 0;
+
+    if (sort === "client") {
+      cmp = String(a.client?.name ?? "").localeCompare(String(b.client?.name ?? ""), "it");
+    } else if (sort === "practice") {
+      cmp = String(a.title ?? "").localeCompare(String(b.title ?? ""), "it");
+    } else if (sort === "status") {
+      cmp = getPracticeStatusLabel(a.apertureStatus).localeCompare(
+        getPracticeStatusLabel(b.apertureStatus),
+        "it"
+      );
+    } else {
+      const at = a.practiceDate ? new Date(a.practiceDate).getTime() : 0;
+      const bt = b.practiceDate ? new Date(b.practiceDate).getTime() : 0;
+      cmp = at - bt;
+    }
+
+    if (cmp === 0) {
+      cmp = String(a.client?.name ?? "").localeCompare(String(b.client?.name ?? ""), "it");
+    }
+    if (cmp === 0) {
+      cmp = String(a.title ?? "").localeCompare(String(b.title ?? ""), "it");
+    }
+
+    return dir === "asc" ? cmp : -cmp;
+  });
 
   const apertureTotal = rows.filter((r: any) => r.inApertureList).length;
   const inAttesa = rows.filter((r: any) => normalizePracticeStatus(r.apertureStatus) === "IN_ATTESA").length;
@@ -279,7 +324,8 @@ export default async function AperturePage({
   ).length;
   const concluse = rows.filter((r: any) => normalizePracticeStatus(r.apertureStatus) === "CONCLUSO").length;
   const totaleImporti = rows.reduce((acc: number, r: any) => acc + getPracticeAmount(r), 0);
-  const totaleSal = rows.reduce((acc: number, r: any) => acc + getBillingSummary(r).total, 0);
+  const totaleFatturatoSal = rows.reduce((acc: number, r: any) => acc + getBillingSummary(r).fatturato, 0);
+  const totaleIncassatoSal = rows.reduce((acc: number, r: any) => acc + getBillingSummary(r).incassato, 0);
 
   const yearOptions = Array.from(
     new Set(
@@ -293,6 +339,47 @@ export default async function AperturePage({
         .filter((n) => Number.isFinite(n))
     )
   ).sort((a, b) => b - a);
+
+  const qsBase = new URLSearchParams();
+  if (q) qsBase.set("q", q);
+  if (status) qsBase.set("status", status);
+  if (year) qsBase.set("year", year);
+  if (clientId) qsBase.set("clientId", clientId);
+  if (onlyAperture) qsBase.set("onlyAperture", onlyAperture);
+
+  function sortHref(nextSort: SortKey) {
+    const qs = new URLSearchParams(qsBase);
+    const nextDir = nextSort === sort ? (dir === "asc" ? "desc" : "asc") : "asc";
+    qs.set("sort", nextSort);
+    qs.set("dir", nextDir);
+    return `/aperture?${qs.toString()}`;
+  }
+
+  function sortIcon(col: SortKey) {
+    if (sort !== col) return <span style={{ opacity: 0.45 }}>↕</span>;
+    return dir === "asc" ? <span>▲</span> : <span>▼</span>;
+  }
+
+  function ThSortable({ col, label }: { col: SortKey; label: string }) {
+    return (
+      <th>
+        <Link
+          href={sortHref(col)}
+          style={{
+            textDecoration: "none",
+            color: "inherit",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            fontWeight: 900,
+          }}
+          title={`Ordina per ${label}`}
+        >
+          {label} {sortIcon(col)}
+        </Link>
+      </th>
+    );
+  }
 
   return (
     <div className="card">
@@ -315,6 +402,9 @@ export default async function AperturePage({
       </div>
 
       <form method="GET" className="card" style={{ marginTop: 12 }}>
+        <input type="hidden" name="sort" value={sort} />
+        <input type="hidden" name="dir" value={dir} />
+
         <div className="grid3">
           <div>
             <label>Cerca</label>
@@ -391,7 +481,8 @@ export default async function AperturePage({
         <div className="card">In corso: <b>{inCorso}</b></div>
         <div className="card">Concluse: <b>{concluse}</b></div>
         <div className="card">Valore pratiche: <b>{eur(totaleImporti)}</b></div>
-        <div className="card">Totale SAL: <b>{eur(totaleSal)}</b></div>
+        <div className="card">Fatturato SAL: <b>{eur(totaleFatturatoSal)}</b></div>
+        <div className="card">Incassato SAL: <b>{eur(totaleIncassatoSal)}</b></div>
       </div>
 
       <div className="muted" style={{ marginTop: 12 }}>
@@ -402,16 +493,15 @@ export default async function AperturePage({
         <table className="table" style={{ marginTop: 12 }}>
           <thead>
             <tr>
-              <th>Pratica</th>
-              <th>Cliente</th>
-              <th>Data</th>
+              <ThSortable col="practice" label="Pratica" />
+              <ThSortable col="client" label="Cliente" />
+              <ThSortable col="date" label="Data" />
               <th>Anno</th>
-              <th>Stato</th>
+              <ThSortable col="status" label="Stato" />
               <th>In Aperture</th>
               <th>Importo</th>
-              <th>SAL</th>
+              <th>Incassato</th>
               <th>Stato SAL</th>
-              <th>Da inviare</th>
               <th>Apri</th>
             </tr>
           </thead>
@@ -447,27 +537,44 @@ export default async function AperturePage({
                   </td>
                   <td>{p.inApertureList ? "SI" : "NO"}</td>
                   <td>{practiceAmount > 0 ? eur(practiceAmount) : "—"}</td>
-                  <td>{billing.count ? eur(billing.total) : "—"}</td>
+                  <td>{billing.incassato > 0 ? eur(billing.incassato) : "—"}</td>
                   <td>
-                    {billing.mainStatus !== "—" ? (
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "4px 10px",
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 800,
-                          ...billingStatusStyle(billing.mainStatus),
-                        }}
-                      >
-                        {billingStatusLabel(billing.mainStatus)}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                      {billing.activeTriggerStatus ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 800,
+                            ...practiceStatusBadgeStyle(billing.activeTriggerStatus),
+                          }}
+                        >
+                          {getPracticeStatusLabel(billing.activeTriggerStatus)}
+                        </span>
+                      ) : null}
+
+                      {billing.activeBillingStatus !== "—" ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 800,
+                            ...billingStatusStyle(billing.activeBillingStatus),
+                          }}
+                        >
+                          {billingStatusLabel(billing.activeBillingStatus)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </div>
                   </td>
-                  <td>{billing.daInviare > 0 ? billing.daInviare : "—"}</td>
                   <td>
                     <Link className="btn" href={`/clients/${p.clientId}/practices/${p.id}`}>
                       Apri

@@ -152,10 +152,26 @@ export default async function ImportExportPage({
         workbook = XLSX.read(buffer, { type: "buffer" });
       } else {
         const csvText = buffer.toString("utf8");
-        const ws = XLSX.utils.csv_to_sheet(csvText, { FS: "," });
-        const sheetName = normalizeSheetName(fileName) || "CSV_IMPORT";
-        workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, ws, sheetName);
+        workbook = XLSX.read(csvText, { type: "string" });
+
+        const originalSheetName =
+          Array.isArray(workbook.SheetNames) && workbook.SheetNames.length > 0
+            ? workbook.SheetNames[0]
+            : "Sheet1";
+
+        const normalizedName = normalizeSheetName(fileName) || "CSV_IMPORT";
+
+        if (
+          originalSheetName &&
+          originalSheetName !== normalizedName &&
+          workbook.Sheets[originalSheetName]
+        ) {
+          workbook.Sheets[normalizedName] = workbook.Sheets[originalSheetName];
+          delete workbook.Sheets[originalSheetName];
+          workbook.SheetNames = [normalizedName];
+        } else if (!workbook.SheetNames?.length) {
+          workbook.SheetNames = [normalizedName];
+        }
       }
 
       const { prisma } = await import("@/lib/prisma");

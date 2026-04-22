@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,6 +33,10 @@ function fmt(d: Date | null | undefined) {
   return d ? new Date(d).toLocaleDateString("it-IT") : "—";
 }
 
+function fmtIso(d: Date | null | undefined) {
+  return d ? new Date(d).toISOString().slice(0, 10) : "";
+}
+
 function fmtYear(v: number | null | undefined) {
   return v ? String(v) : "—";
 }
@@ -41,6 +46,12 @@ function fmtEur(v: any) {
   const n = Number(String(v).replace(",", "."));
   if (!Number.isFinite(n)) return "—";
   return n.toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+}
+
+function fmtMoneyInput(v: any) {
+  if (v == null || v === "") return "";
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) && n !== 0 ? String(n).replace(".", ",") : "";
 }
 
 function toNum(v: any) {
@@ -223,8 +234,8 @@ function normalizeEconomicPayload(raw: any): EconomicPayload | null {
       raw.accontoYear == null || raw.accontoYear === ""
         ? null
         : Number.isFinite(Number(raw.accontoYear))
-        ? Number(raw.accontoYear)
-        : null,
+          ? Number(raw.accontoYear)
+          : null,
     accontoNotes: raw.accontoNotes ? String(raw.accontoNotes) : null,
     saldoEur: raw.saldoEur == null || raw.saldoEur === "" ? null : toNum(raw.saldoEur),
     saldoDate: raw.saldoDate ? String(raw.saldoDate) : null,
@@ -232,8 +243,8 @@ function normalizeEconomicPayload(raw: any): EconomicPayload | null {
       raw.saldoYear == null || raw.saldoYear === ""
         ? null
         : Number.isFinite(Number(raw.saldoYear))
-        ? Number(raw.saldoYear)
-        : null,
+          ? Number(raw.saldoYear)
+          : null,
     saldoNotes: raw.saldoNotes ? String(raw.saldoNotes) : null,
     paymentRows: paymentRowsRaw
       .map((row: any, i: number) => ({
@@ -244,8 +255,8 @@ function normalizeEconomicPayload(raw: any): EconomicPayload | null {
           row?.paidYear == null || row?.paidYear === ""
             ? null
             : Number.isFinite(Number(row.paidYear))
-            ? Number(row.paidYear)
-            : null,
+              ? Number(row.paidYear)
+              : null,
         notes: row?.notes ? String(row.notes) : null,
       }))
       .filter((row: any) => row.label || row.amountEur || row.paidAt || row.notes),
@@ -373,8 +384,8 @@ function extractPaymentRows(p: any, econ: EconomicPayload | null) {
       paidYearRaw == null || paidYearRaw === ""
         ? null
         : Number.isFinite(Number(paidYearRaw))
-        ? Number(paidYearRaw)
-        : null;
+          ? Number(paidYearRaw)
+          : null;
 
     const label =
       String(item.label ?? item.name ?? item.type ?? item.tipo ?? item.description ?? "").trim() ||
@@ -415,8 +426,8 @@ function extractPaymentRows(p: any, econ: EconomicPayload | null) {
     accontoYearRaw == null || accontoYearRaw === ""
       ? null
       : Number.isFinite(Number(accontoYearRaw))
-      ? Number(accontoYearRaw)
-      : null;
+        ? Number(accontoYearRaw)
+        : null;
   const accontoNotes = String(p?.accontoNotes ?? econ?.accontoNotes ?? "").trim();
 
   if (accontoAmount > 0 || accontoDate || accontoNotes) {
@@ -450,8 +461,8 @@ function extractPaymentRows(p: any, econ: EconomicPayload | null) {
     saldoYearRaw == null || saldoYearRaw === ""
       ? null
       : Number.isFinite(Number(saldoYearRaw))
-      ? Number(saldoYearRaw)
-      : null;
+        ? Number(saldoYearRaw)
+        : null;
   const saldoNotes = String(p?.saldoNotes ?? econ?.saldoNotes ?? "").trim();
 
   if (saldoAmount > 0 || saldoDate || saldoNotes) {
@@ -506,6 +517,187 @@ export default async function PracticeDetailPage({
   const totalPaid = Math.max(paymentRowsTotal, billingIncassato);
   const remaining = Math.max(totalPracticeAmount - totalPaid, 0);
 
+  async function updateBillingSteps(formData: FormData) {
+    "use server";
+
+    const { prisma } = await import("@/lib/prisma");
+
+    const practice = await prisma.clientPractice.findUnique({
+      where: { id: params.practiceId },
+      include: {
+        billingSteps: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        },
+      },
+    });
+
+    if (!practice || practice.clientId !== params.id) {
+      redirect(`/clients/${params.id}`);
+    }
+
+    const currentStatus =
+      String((practice as any).apertureStatus ?? "").trim().toUpperCase() || "IN_ATTESA";
+
+    const stepIds = formData.getAll("billingStepId").map((v) => String(v ?? "").trim());
+    const stepSortOrders = formData.getAll("billingStepSortOrder").map((v) => String(v ?? "").trim());
+    const stepLabels = formData.getAll("billingStepLabel").map((v) => String(v ?? "").trim());
+    const stepTypes = formData
+      .getAll("billingStepType")
+      .map((v) => String(v ?? "").trim().toUpperCase());
+    const stepTriggers = formData
+      .getAll("billingStepTriggerStatus")
+      .map((v) => String(v ?? "").trim().toUpperCase());
+    const stepAmounts = formData
+      .getAll("billingStepAmountEur")
+      .map((v) => String(v ?? "").trim());
+    const stepStatuses = formData
+      .getAll("billingStepStatus")
+      .map((v) => String(v ?? "").trim().toUpperCase());
+    const stepInvoiceNumbers = formData
+      .getAll("billingStepInvoiceNumber")
+      .map((v) => String(v ?? "").trim());
+    const stepInvoiceDates = formData
+      .getAll("billingStepInvoiceDate")
+      .map((v) => String(v ?? "").trim());
+    const stepPaidAts = formData.getAll("billingStepPaidAt").map((v) => String(v ?? "").trim());
+    const stepNotes = formData.getAll("billingStepNotes").map((v) => String(v ?? "").trim());
+
+    const existingStepIds = new Set<string>(
+      ((practice as any).billingSteps ?? []).map((x: any) => String(x.id))
+    );
+
+    const incomingUsedIds = new Set<string>();
+    const billingStepRows: Array<{
+      id: string | null;
+      sortOrder: number;
+      label: string;
+      billingType: string;
+      triggerStatus: string | null;
+      amountEur: number;
+      billingStatus: string;
+      invoiceNumber: string | null;
+      invoiceDate: Date | null;
+      paidAt: Date | null;
+      notes: string | null;
+    }> = [];
+
+    for (let i = 0; i < stepLabels.length; i++) {
+      const id = stepIds[i] || "";
+      const label = stepLabels[i] || "";
+      const billingType = stepTypes[i] || "ALTRO";
+      const triggerStatus = stepTriggers[i] || null;
+      const amountEurStep = toNum(stepAmounts[i]);
+      const billingStatus = stepStatuses[i] || "DA_FATTURARE";
+      const invoiceNumber = stepInvoiceNumbers[i] || null;
+      const invoiceDateInput = stepInvoiceDates[i]
+        ? new Date(`${stepInvoiceDates[i]}T12:00:00`)
+        : null;
+      const paidAtInput = stepPaidAts[i] ? new Date(`${stepPaidAts[i]}T12:00:00`) : null;
+      const note = stepNotes[i] || null;
+      const sortOrderRaw = stepSortOrders[i];
+      const sortOrder =
+        sortOrderRaw && Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : i + 1;
+
+      const isBlank =
+        !label &&
+        !amountEurStep &&
+        !triggerStatus &&
+        !invoiceNumber &&
+        !invoiceDateInput &&
+        !paidAtInput &&
+        !note;
+
+      if (isBlank) continue;
+
+      if (id) incomingUsedIds.add(id);
+
+      let nextBillingStatus = billingStatus;
+      if (
+        nextBillingStatus === "DA_FATTURARE" &&
+        triggerStatus &&
+        triggerStatus === currentStatus
+      ) {
+        nextBillingStatus = "FATTURA_DA_INVIARE";
+      }
+
+      let invoiceDate = invoiceDateInput;
+      let paidAt = paidAtInput;
+
+      if (nextBillingStatus === "FATTURATA" && !invoiceDate) {
+        invoiceDate = new Date();
+      }
+
+      if (nextBillingStatus === "INCASSATA") {
+        if (!invoiceDate) invoiceDate = new Date();
+        if (!paidAt) paidAt = new Date();
+      }
+
+      billingStepRows.push({
+        id: id || null,
+        sortOrder,
+        label: label || `Voce ${i + 1}`,
+        billingType: billingType || "ALTRO",
+        triggerStatus,
+        amountEur: amountEurStep,
+        billingStatus: nextBillingStatus,
+        invoiceNumber,
+        invoiceDate,
+        paidAt,
+        notes: note,
+      });
+    }
+
+    const deleteIds = Array.from(existingStepIds).filter((id: string) => !incomingUsedIds.has(id));
+
+    if (deleteIds.length) {
+      await prisma.practiceBillingStep.deleteMany({
+        where: {
+          id: { in: deleteIds },
+          practiceId: params.practiceId,
+        },
+      });
+    }
+
+    for (const step of billingStepRows) {
+      if (step.id) {
+        await prisma.practiceBillingStep.update({
+          where: { id: step.id },
+          data: {
+            sortOrder: step.sortOrder,
+            label: step.label,
+            billingType: step.billingType,
+            triggerStatus: step.triggerStatus,
+            amountEur: step.amountEur,
+            billingStatus: step.billingStatus,
+            invoiceNumber: step.invoiceNumber,
+            invoiceDate: step.invoiceDate,
+            paidAt: step.paidAt,
+            notes: step.notes,
+          },
+        });
+      } else {
+        await prisma.practiceBillingStep.create({
+          data: {
+            practiceId: params.practiceId,
+            sortOrder: step.sortOrder,
+            label: step.label,
+            billingType: step.billingType,
+            triggerStatus: step.triggerStatus,
+            amountEur: step.amountEur,
+            billingStatus: step.billingStatus,
+            invoiceNumber: step.invoiceNumber,
+            invoiceDate: step.invoiceDate,
+            paidAt: step.paidAt,
+            notes: step.notes,
+          },
+        });
+      }
+    }
+
+    revalidatePath(`/clients/${params.id}/practices/${params.practiceId}`);
+    redirect(`/clients/${params.id}/practices/${params.practiceId}`);
+  }
+
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -517,7 +709,7 @@ export default async function PracticeDetailPage({
           </Link>
 
           <Link className="btn" href={`/clients/${params.id}/practices/${params.practiceId}/edit`}>
-            Modifica
+            Modifica pratica
           </Link>
 
           <Link className="btn" href={`/clients/${params.id}/practices/${params.practiceId}/delete`}>
@@ -641,11 +833,17 @@ export default async function PracticeDetailPage({
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <h2>Piano fatturazione / SAL</h2>
+      <form action={updateBillingSteps} className="card" style={{ marginTop: 12 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ margin: 0 }}>Piano fatturazione / SAL</h2>
 
-        {billingSteps.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
+          <button className="btn primary" type="submit">
+            Salva SAL
+          </button>
+        </div>
+
+        <div style={{ overflowX: "auto", marginTop: 10 }}>
+          <table className="table sal-edit-table">
             <thead>
               <tr>
                 <th>#</th>
@@ -657,86 +855,151 @@ export default async function PracticeDetailPage({
                 <th>N. fattura</th>
                 <th>Data fattura</th>
                 <th>Incasso</th>
+                <th>Note</th>
               </tr>
             </thead>
 
             <tbody>
-              {billingSteps.map((row: any, idx: number) => {
+              {Array.from({ length: Math.max(billingSteps.length, 4) }).map((_, i) => {
+                const current = billingSteps[i];
                 const triggerNow =
-                  String(row.triggerStatus ?? "").trim().toUpperCase() !== "" &&
-                  String(row.triggerStatus ?? "").trim().toUpperCase() ===
+                  String(current?.triggerStatus ?? "").trim().toUpperCase() !== "" &&
+                  String(current?.triggerStatus ?? "").trim().toUpperCase() ===
                     String(practiceAny.apertureStatus ?? "").trim().toUpperCase() &&
-                  String(row.billingStatus ?? "").trim().toUpperCase() === "DA_FATTURARE";
+                  String(current?.billingStatus ?? "").trim().toUpperCase() === "DA_FATTURARE";
 
                 return (
-                  <tr key={row.id}>
-                    <td>{row.sortOrder ?? idx + 1}</td>
-
-                    <td style={{ maxWidth: 280, whiteSpace: "normal", wordBreak: "break-word" }}>
-                      <b>{row.label ?? "—"}</b>
-                      {row.notes ? <div className="muted" style={{ marginTop: 4 }}>{row.notes}</div> : null}
+                  <tr key={current?.id ?? `new-${i}`}>
+                    <td>
+                      {current?.sortOrder ?? i + 1}
+                      <input type="hidden" name="billingStepId" value={current?.id ?? ""} />
+                      <input
+                        type="hidden"
+                        name="billingStepSortOrder"
+                        value={String(current?.sortOrder ?? i + 1)}
+                      />
                     </td>
 
-                    <td>{billingTypeLabel(row.billingType)}</td>
+                    <td>
+                      <select
+                        className="input sal-input"
+                        name="billingStepLabel"
+                        defaultValue={current?.label ?? ""}
+                      >
+                        <option value="">—</option>
+                        <option value="Accettazione">Accettazione</option>
+                        <option value="Primo acconto">Primo acconto</option>
+                        <option value="Secondo acconto">Secondo acconto</option>
+                        <option value="Saldo">Saldo</option>
+                      </select>
+                    </td>
 
                     <td>
-                      {row.triggerStatus ? (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "4px 10px",
-                            borderRadius: 999,
-                            fontSize: 12,
-                            fontWeight: 800,
-                            ...practiceStatusBadgeStyle(row.triggerStatus),
-                          }}
-                        >
-                          {practiceStatusLabel(row.triggerStatus)}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
+                      <select
+                        className="input sal-input"
+                        name="billingStepType"
+                        defaultValue={current?.billingType ?? "ALTRO"}
+                      >
+                        <option value="ACCETTAZIONE">Accettazione</option>
+                        <option value="PRIMO_ACCONTO">Primo acconto</option>
+                        <option value="SECONDO_ACCONTO">Secondo acconto</option>
+                        <option value="SALDO">Saldo</option>
+                        <option value="ALTRO">Altro</option>
+                      </select>
+                    </td>
+
+                    <td>
+                      <select
+                        className="input sal-input"
+                        name="billingStepTriggerStatus"
+                        defaultValue={current?.triggerStatus ?? ""}
+                      >
+                        <option value="">Nessuno</option>
+                        <option value="IN_ATTESA">In attesa</option>
+                        <option value="INVIATA_REGIONE">Inviata Regione</option>
+                        <option value="INIZIO_LAVORI">Inizio lavori</option>
+                        <option value="ACCETTATO">Accettato</option>
+                        <option value="ISPEZIONE_ASL">Ispezione ASL</option>
+                        <option value="CONCLUSO">Concluso</option>
+                      </select>
 
                       {triggerNow ? (
                         <div className="muted" style={{ marginTop: 6, color: "#92400e", fontWeight: 700 }}>
-                          Da attivare ora
+                          Da attivare
                         </div>
                       ) : null}
                     </td>
 
-                    <td>{toNum(row.amountEur) > 0 ? fmtEur(row.amountEur) : "—"}</td>
-
                     <td>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "4px 10px",
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 800,
-                          ...billingStatusBadgeStyle(row.billingStatus),
-                        }}
-                      >
-                        {billingStatusLabel(row.billingStatus)}
-                      </span>
+                      <input
+                        className="input sal-input"
+                        name="billingStepAmountEur"
+                        defaultValue={fmtMoneyInput(current?.amountEur)}
+                        placeholder="500"
+                      />
                     </td>
 
-                    <td>{row.invoiceNumber ?? "—"}</td>
-                    <td>{fmt(row.invoiceDate)}</td>
-                    <td>{fmt(row.paidAt)}</td>
+                    <td>
+                      <select
+                        className="input sal-input"
+                        name="billingStepStatus"
+                        defaultValue={current?.billingStatus ?? "DA_FATTURARE"}
+                      >
+                        <option value="DA_FATTURARE">Da fatturare</option>
+                        <option value="FATTURA_DA_INVIARE">Fattura da inviare</option>
+                        <option value="FATTURATA">Fatturata</option>
+                        <option value="INCASSATA">Incassata</option>
+                      </select>
+                    </td>
+
+                    <td>
+                      <input
+                        className="input sal-input"
+                        name="billingStepInvoiceNumber"
+                        defaultValue={current?.invoiceNumber ?? ""}
+                        placeholder="45/2026"
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        className="input sal-input"
+                        type="date"
+                        name="billingStepInvoiceDate"
+                        defaultValue={fmtIso(current?.invoiceDate ?? null)}
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        className="input sal-input"
+                        type="date"
+                        name="billingStepPaidAt"
+                        defaultValue={fmtIso(current?.paidAt ?? null)}
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        className="input sal-input"
+                        name="billingStepNotes"
+                        defaultValue={current?.notes ?? ""}
+                        placeholder="Facoltative"
+                      />
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna riga SAL ancora inserita.
-          </div>
-        )}
-      </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 14, gap: 8 }}>
+          <button className="btn primary" type="submit">
+            Salva SAL
+          </button>
+        </div>
+      </form>
 
       <div className="card" style={{ marginTop: 12 }}>
         <h2 style={{ marginBottom: 10 }}>Riepilogo economico</h2>
@@ -768,6 +1031,20 @@ export default async function PracticeDetailPage({
           Il totale incassato considera sia i pagamenti pratica classici sia i SAL marcati come incassati.
         </div>
       </div>
+
+      <style>{`
+        .sal-edit-table {
+          min-width: 1350px;
+        }
+        .sal-edit-table td,
+        .sal-edit-table th {
+          vertical-align: top;
+        }
+        .sal-input {
+          min-width: 140px;
+          width: 100%;
+        }
+      `}</style>
     </div>
   );
 }

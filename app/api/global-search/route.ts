@@ -1,10 +1,10 @@
-
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const { prisma } = await import("@/lib/prisma");
+
   try {
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") ?? "").trim();
@@ -15,7 +15,10 @@ export async function GET(req: Request) {
 
     const clients = await prisma.client.findMany({
       where: {
-        name: { contains: q },
+        name: {
+          contains: q,
+          mode: "insensitive",
+        },
       },
       take: 6,
       select: { id: true, name: true },
@@ -24,8 +27,18 @@ export async function GET(req: Request) {
     const people = await prisma.person.findMany({
       where: {
         OR: [
-          { firstName: { contains: q } },
-          { lastName: { contains: q } },
+          {
+            firstName: {
+              contains: q,
+              mode: "insensitive",
+            },
+          },
+          {
+            lastName: {
+              contains: q,
+              mode: "insensitive",
+            },
+          },
         ],
       },
       take: 6,

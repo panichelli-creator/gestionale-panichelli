@@ -316,15 +316,12 @@ function billingStatusStyle(v: string | null | undefined) {
 function getBillingSummary(p: any) {
   const steps = Array.isArray(p?.billingSteps) ? p.billingSteps : [];
 
-  const total = steps.reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
-  const daInviare = steps.filter(
-    (row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURA_DA_INVIARE"
-  ).length;
   const fatturato = steps
     .filter((row: any) =>
       ["FATTURATA", "INCASSATA"].includes(String(row?.billingStatus ?? "").trim().toUpperCase())
     )
     .reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
+
   const incassato = steps
     .filter((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "INCASSATA")
     .reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
@@ -345,8 +342,6 @@ function getBillingSummary(p: any) {
   }
 
   return {
-    total,
-    daInviare,
     fatturato,
     incassato,
     count: steps.length,
@@ -480,14 +475,6 @@ export default async function ClientDetailPage({
   ).length;
   const totalPracticesValue = client.practices.reduce(
     (acc: number, p: any) => acc + getPracticeAmount(p),
-    0
-  );
-  const totalBillingRows = client.practices.reduce(
-    (acc: number, p: any) => acc + (Array.isArray(p.billingSteps) ? p.billingSteps.length : 0),
-    0
-  );
-  const totalBillingDaInviare = client.practices.reduce(
-    (acc: number, p: any) => acc + getBillingSummary(p).daInviare,
     0
   );
   const totalBillingFatturato = client.practices.reduce(
@@ -1062,12 +1049,6 @@ export default async function ClientDetailPage({
             Valore totale: <b>{eur(totalPracticesValue)}</b>
           </div>
           <div className="card">
-            SAL: <b>{totalBillingRows}</b>
-          </div>
-          <div className="card">
-            Da inviare: <b>{totalBillingDaInviare}</b>
-          </div>
-          <div className="card">
             Fatturato SAL: <b>{eur(totalBillingFatturato)}</b>
           </div>
           <div className="card">
@@ -1085,9 +1066,8 @@ export default async function ClientDetailPage({
                 <th>Stato</th>
                 <th>In Aperture</th>
                 <th>Importo</th>
-                <th>SAL</th>
+                <th>Incassato</th>
                 <th>Stato SAL</th>
-                <th>Da inviare</th>
                 <th>Apri</th>
               </tr>
             </thead>
@@ -1121,7 +1101,7 @@ export default async function ClientDetailPage({
                     </td>
                     <td>{p.inApertureList ? "SI" : "NO"}</td>
                     <td>{practiceAmount > 0 ? eur(practiceAmount) : "—"}</td>
-                    <td>{billing.count ? eur(billing.total) : "—"}</td>
+                    <td>{billing.incassato > 0 ? eur(billing.incassato) : "—"}</td>
                     <td>
                       {billing.mainStatus !== "—" ? (
                         <span
@@ -1141,7 +1121,6 @@ export default async function ClientDetailPage({
                         <span className={fatt.cls}>{fatt.label}</span>
                       )}
                     </td>
-                    <td>{billing.daInviare > 0 ? billing.daInviare : "—"}</td>
                     <td>
                       <Link className="btn" href={`/clients/${client.id}/practices/${p.id}`}>
                         Apri

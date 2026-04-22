@@ -44,12 +44,6 @@ function emptyToNull(v: unknown) {
   return s;
 }
 
-function parseBoolLoose(v: unknown) {
-  const s = upper(v);
-  if (!s) return false;
-  return ["SI", "SÌ", "YES", "TRUE", "1", "OK", "X"].includes(s);
-}
-
 function splitFullName(raw: string) {
   const full = norm(raw).replace(/\s+/g, " ");
   if (!full) {
@@ -114,6 +108,10 @@ function cleanFiscalCode(v: unknown) {
   return s || null;
 }
 
+function normalizeSheetName(name: string) {
+  return norm(name).replace(/\.csv$/i, "").trim();
+}
+
 export default async function ImportExportPage({
   searchParams,
 }: {
@@ -133,17 +131,32 @@ export default async function ImportExportPage({
         redirect("/import-export?err=" + encodeURIComponent("File mancante"));
       }
 
-      if (!file.name?.toLowerCase().endsWith(".xlsx")) {
+      const fileName = norm(file.name);
+      const isXlsx = /\.xlsx$/i.test(fileName);
+      const isCsv = /\.csv$/i.test(fileName);
+
+      if (!isXlsx && !isCsv) {
         redirect(
           "/import-export?err=" +
-            encodeURIComponent("Seleziona un file .xlsx")
+            encodeURIComponent("Seleziona un file .xlsx oppure .csv")
         );
       }
 
       const buffer = Buffer.from(await file.arrayBuffer());
 
       const XLSX = await import("xlsx");
-      const workbook = XLSX.read(buffer, { type: "buffer" });
+
+      let workbook: any;
+
+      if (isXlsx) {
+        workbook = XLSX.read(buffer, { type: "buffer" });
+      } else {
+        const csvText = buffer.toString("utf8");
+        const ws = XLSX.utils.csv_to_sheet(csvText, { FS: "," });
+        const sheetName = normalizeSheetName(fileName) || "CSV_IMPORT";
+        workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, ws, sheetName);
+      }
 
       const { prisma } = await import("@/lib/prisma");
 
@@ -408,7 +421,6 @@ export default async function ImportExportPage({
         formazioneCreate++;
       }
 
-      // ===== CLIENTI =====
       if (workbook.Sheets["CLIENTI"]) {
         const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["CLIENTI"], { defval: "" });
 
@@ -467,7 +479,6 @@ export default async function ImportExportPage({
         }
       }
 
-      // ===== SEDI =====
       if (workbook.Sheets["SEDI"]) {
         const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["SEDI"], { defval: "" });
 
@@ -513,7 +524,6 @@ export default async function ImportExportPage({
         }
       }
 
-      // ===== PERSONE (template) =====
       if (workbook.Sheets["PERSONE"]) {
         const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["PERSONE"], { defval: "" });
 
@@ -536,7 +546,6 @@ export default async function ImportExportPage({
         }
       }
 
-      // ===== PERSONALE (vecchio gestionale) =====
       if (workbook.Sheets["PERSONALE"]) {
         const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["PERSONALE"], { defval: "" });
 
@@ -559,7 +568,6 @@ export default async function ImportExportPage({
         }
       }
 
-      // ===== FORMAZIONE (template) =====
       if (workbook.Sheets["FORMAZIONE"]) {
         const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets["FORMAZIONE"], { defval: "" });
 
@@ -610,11 +618,11 @@ export default async function ImportExportPage({
         }
       }
 
-      // ===== FOGLI CORSI VECCHIO GESTIONALE =====
-      for (const sheetName of workbook.SheetNames) {
+      for (const rawSheetName of workbook.SheetNames) {
+        const sheetName = normalizeSheetName(rawSheetName);
         if (!OLD_COURSE_SHEETS.has(sheetName.toUpperCase())) continue;
 
-        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets[sheetName], { defval: "" });
+        const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets[rawSheetName], { defval: "" });
 
         for (const r of rows) {
           try {
@@ -697,14 +705,16 @@ export default async function ImportExportPage({
       <ExportButtons />
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h2>Import Excel Unico (.xlsx)</h2>
+        <h2>Import File (.xlsx / .csv)</h2>
 
         <div className="muted" style={{ marginTop: 6 }}>
-          Carica un file Excel unico.
+          Puoi caricare:
           <br />
-          Supporta sia i fogli del tuo template sia i fogli corsi del vecchio gestionale.
+          - un file Excel unico `.xlsx` con più fogli
           <br />
-          Per il vecchio gestionale: metti ogni CSV in un foglio separato dello stesso file .xlsx.
+          - oppure un singolo file `.csv` del vecchio gestionale
+          <br />
+          Se carichi un CSV corso, il nome del file deve restare uguale al nome del corso.
         </div>
 
         {ok ? (
@@ -735,20 +745,20 @@ export default async function ImportExportPage({
 
         <form action={importExcelAction} className="card" style={{ marginTop: 12 }}>
           <div>
-            <label htmlFor="file">File Excel unico</label>
+            <label htmlFor="file">File import</label>
             <input
               id="file"
               className="input"
               type="file"
               name="file"
-              accept=".xlsx"
+              accept=".xlsx,.csv"
               required
             />
           </div>
 
           <div className="row" style={{ marginTop: 14, gap: 8 }}>
             <button className="btn primary" type="submit">
-              IMPORTA EXCEL COMPLETO
+              IMPORTA FILE
             </button>
 
             <Link className="btn" href="/import-export">

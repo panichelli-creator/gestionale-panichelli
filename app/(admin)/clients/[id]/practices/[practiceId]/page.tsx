@@ -9,14 +9,6 @@ const ECON_END = "--- FINE ECONOMICA_JSON ---";
 const ECON_B64_PREFIX = "[[ECON_B64:";
 const ECON_B64_SUFFIX = "]]";
 
-type PaymentRow = {
-  label: string;
-  amount: number;
-  paidAt: Date | null;
-  paidYear: number | null;
-  notes: string;
-};
-
 type EconomicPayload = {
   costoPraticaEur: number | null;
   accontoEur: number | null;
@@ -506,16 +498,9 @@ export default async function PracticeDetailPage({
   const paymentRows = extractPaymentRows(practiceAny, econ);
 
   const billingSteps = Array.isArray((p as any).billingSteps) ? (p as any).billingSteps : [];
-  const billingTotal = billingSteps.reduce((acc: number, row: any) => acc + toNum(row.amountEur), 0);
-  const billingFatturato = billingSteps
-    .filter((row: any) => ["FATTURATA", "INCASSATA"].includes(String(row.billingStatus ?? "").toUpperCase()))
-    .reduce((acc: number, row: any) => acc + toNum(row.amountEur), 0);
   const billingIncassato = billingSteps
     .filter((row: any) => String(row.billingStatus ?? "").toUpperCase() === "INCASSATA")
     .reduce((acc: number, row: any) => acc + toNum(row.amountEur), 0);
-  const billingDaInviare = billingSteps.filter(
-    (row: any) => String(row.billingStatus ?? "").toUpperCase() === "FATTURA_DA_INVIARE"
-  ).length;
 
   const paymentRowsTotal = paymentRows.reduce((acc, row) => acc + row.amount, 0);
   const totalPaid = Math.max(paymentRowsTotal, billingIncassato);
@@ -657,33 +642,7 @@ export default async function PracticeDetailPage({
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
-          <div className="card">
-            SAL totali: <b>{billingSteps.length}</b>
-          </div>
-          <div className="card">
-            Da inviare: <b>{billingDaInviare}</b>
-          </div>
-          <div className="card">
-            Totale SAL: <b>{billingTotal > 0 ? fmtEur(billingTotal) : "—"}</b>
-          </div>
-          <div className="card">
-            Fatturato SAL: <b>{billingFatturato > 0 ? fmtEur(billingFatturato) : "—"}</b>
-          </div>
-          <div className="card">
-            Incassato SAL: <b>{billingIncassato > 0 ? fmtEur(billingIncassato) : "—"}</b>
-          </div>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h2>Piano fatturazione / SAL</h2>
-
-          <Link className="btn" href={`/clients/${params.id}/practices/${params.practiceId}/edit`}>
-            Gestisci SAL
-          </Link>
-        </div>
+        <h2>Piano fatturazione / SAL</h2>
 
         {billingSteps.length ? (
           <table className="table" style={{ marginTop: 10 }}>
@@ -808,50 +767,6 @@ export default async function PracticeDetailPage({
         <div className="muted" style={{ marginTop: 10 }}>
           Il totale incassato considera sia i pagamenti pratica classici sia i SAL marcati come incassati.
         </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h2>Pagamenti pratica</h2>
-
-          <Link className="btn" href={`/clients/${params.id}/practices/${params.practiceId}/edit`}>
-            Gestisci pagamenti
-          </Link>
-        </div>
-
-        {paymentRows.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
-            <thead>
-              <tr>
-                <th>Voce</th>
-                <th>Importo</th>
-                <th>Data pagamento</th>
-                <th>Anno fatturato</th>
-                <th>Note</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {paymentRows.map((row, idx) => (
-                <tr key={`${row.label}-${idx}`}>
-                  <td>
-                    <b>{row.label}</b>
-                  </td>
-                  <td>{row.amount > 0 ? fmtEur(row.amount) : "—"}</td>
-                  <td>{fmt(row.paidAt)}</td>
-                  <td>{fmtYear(row.paidYear)}</td>
-                  <td style={{ maxWidth: 360, whiteSpace: "normal", wordBreak: "break-word" }}>
-                    {row.notes || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessun pagamento inserito.
-          </div>
-        )}
       </div>
     </div>
   );

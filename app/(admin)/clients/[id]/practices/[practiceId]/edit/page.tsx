@@ -32,12 +32,6 @@ function fmtIso(d: Date | null) {
   return d ? new Date(d).toISOString().slice(0, 10) : "";
 }
 
-function fmtMoneyInput(v: any) {
-  if (v == null || v === "") return "";
-  const n = Number(String(v).replace(",", "."));
-  return Number.isFinite(n) && n !== 0 ? String(n).replace(".", ",") : "";
-}
-
 function isConcluso(v: string | null | undefined) {
   return String(v ?? "").trim().toUpperCase() === "CONCLUSO";
 }
@@ -209,9 +203,6 @@ export default async function EditPracticePage({
     where: { id: params.practiceId },
     include: {
       client: true,
-      billingSteps: {
-        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-      },
     },
   });
 
@@ -224,8 +215,6 @@ export default async function EditPracticePage({
 
   const notesParts = splitNotesAndEconomic(p.notes);
   const econ = notesParts.economic;
-
-  const billingSteps = Array.isArray(row.billingSteps) ? row.billingSteps : [];
 
   async function updatePractice(formData: FormData) {
     "use server";
@@ -250,119 +239,6 @@ export default async function EditPracticePage({
       redirect(`/clients/${clientId}/practices/${practiceId}/edit`);
     }
 
-    const stepIds = formData.getAll("billingStepId").map((v) => String(v ?? "").trim());
-    const stepSortOrders = formData
-      .getAll("billingStepSortOrder")
-      .map((v) => String(v ?? "").trim());
-    const stepLabels = formData.getAll("billingStepLabel").map((v) => String(v ?? "").trim());
-    const stepTypes = formData
-      .getAll("billingStepType")
-      .map((v) => String(v ?? "").trim().toUpperCase());
-    const stepTriggers = formData
-      .getAll("billingStepTriggerStatus")
-      .map((v) => String(v ?? "").trim().toUpperCase());
-    const stepAmounts = formData
-      .getAll("billingStepAmountEur")
-      .map((v) => String(v ?? "").trim());
-    const stepStatuses = formData
-      .getAll("billingStepStatus")
-      .map((v) => String(v ?? "").trim().toUpperCase());
-    const stepInvoiceNumbers = formData
-      .getAll("billingStepInvoiceNumber")
-      .map((v) => String(v ?? "").trim());
-    const stepInvoiceDates = formData
-      .getAll("billingStepInvoiceDate")
-      .map((v) => String(v ?? "").trim());
-    const stepPaidAts = formData.getAll("billingStepPaidAt").map((v) => String(v ?? "").trim());
-    const stepNotes = formData.getAll("billingStepNotes").map((v) => String(v ?? "").trim());
-
-    const existingStepIds = new Set<string>(
-      (Array.isArray(row.billingSteps) ? row.billingSteps : []).map((x: any) => String(x.id))
-    );
-
-    const incomingUsedIds = new Set<string>();
-    const billingStepRows: Array<{
-      id: string | null;
-      sortOrder: number;
-      label: string;
-      billingType: string;
-      triggerStatus: string | null;
-      amountEur: number;
-      billingStatus: string;
-      invoiceNumber: string | null;
-      invoiceDate: Date | null;
-      paidAt: Date | null;
-      notes: string | null;
-    }> = [];
-
-    for (let i = 0; i < stepLabels.length; i++) {
-      const id = stepIds[i] || "";
-      const label = stepLabels[i] || "";
-      const billingType = stepTypes[i] || "ALTRO";
-      const triggerStatus = stepTriggers[i] || null;
-      const amountEurStep = toNum(stepAmounts[i]);
-      const billingStatus = stepStatuses[i] || "DA_FATTURARE";
-      const invoiceNumber = stepInvoiceNumbers[i] || null;
-      const invoiceDateInput = stepInvoiceDates[i]
-        ? new Date(`${stepInvoiceDates[i]}T12:00:00`)
-        : null;
-      const paidAtInput = stepPaidAts[i] ? new Date(`${stepPaidAts[i]}T12:00:00`) : null;
-      const note = stepNotes[i] || null;
-      const sortOrderRaw = stepSortOrders[i];
-      const sortOrder =
-        sortOrderRaw && Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : i + 1;
-
-      const isBlank =
-        !label &&
-        !amountEurStep &&
-        !triggerStatus &&
-        !invoiceNumber &&
-        !invoiceDateInput &&
-        !paidAtInput &&
-        !note;
-
-      if (isBlank) continue;
-
-      if (id) incomingUsedIds.add(id);
-
-      let nextBillingStatus = billingStatus;
-      if (
-        nextBillingStatus === "DA_FATTURARE" &&
-        triggerStatus &&
-        triggerStatus === apertureStatus
-      ) {
-        nextBillingStatus = "FATTURA_DA_INVIARE";
-      }
-
-      let invoiceDate = invoiceDateInput;
-      let paidAt = paidAtInput;
-
-      if (nextBillingStatus === "FATTURATA" && !invoiceDate) {
-        invoiceDate = new Date();
-      }
-
-      if (nextBillingStatus === "INCASSATA") {
-        if (!invoiceDate) invoiceDate = new Date();
-        if (!paidAt) paidAt = new Date();
-      }
-
-      billingStepRows.push({
-        id: id || null,
-        sortOrder,
-        label: label || `Voce ${i + 1}`,
-        billingType: billingType || "ALTRO",
-        triggerStatus,
-        amountEur: amountEurStep,
-        billingStatus: nextBillingStatus,
-        invoiceNumber,
-        invoiceDate,
-        paidAt,
-        notes: note,
-      });
-    }
-
-    const deleteIds = Array.from(existingStepIds).filter((id: string) => !incomingUsedIds.has(id));
-
     await prisma.clientPractice.update({
       where: { id: practiceId },
       data: {
@@ -377,51 +253,6 @@ export default async function EditPracticePage({
         notes: buildNotesWithEconomic(notes, econ),
       },
     });
-
-    if (deleteIds.length) {
-      await prisma.practiceBillingStep.deleteMany({
-        where: {
-          id: { in: deleteIds },
-          practiceId,
-        },
-      });
-    }
-
-    for (const step of billingStepRows) {
-      if (step.id) {
-        await prisma.practiceBillingStep.update({
-          where: { id: step.id },
-          data: {
-            sortOrder: step.sortOrder,
-            label: step.label,
-            billingType: step.billingType,
-            triggerStatus: step.triggerStatus,
-            amountEur: step.amountEur,
-            billingStatus: step.billingStatus,
-            invoiceNumber: step.invoiceNumber,
-            invoiceDate: step.invoiceDate,
-            paidAt: step.paidAt,
-            notes: step.notes,
-          },
-        });
-      } else {
-        await prisma.practiceBillingStep.create({
-          data: {
-            practiceId,
-            sortOrder: step.sortOrder,
-            label: step.label,
-            billingType: step.billingType,
-            triggerStatus: step.triggerStatus,
-            amountEur: step.amountEur,
-            billingStatus: step.billingStatus,
-            invoiceNumber: step.invoiceNumber,
-            invoiceDate: step.invoiceDate,
-            paidAt: step.paidAt,
-            notes: step.notes,
-          },
-        });
-      }
-    }
 
     redirect(`/clients/${clientId}/practices/${practiceId}`);
   }
@@ -534,151 +365,6 @@ export default async function EditPracticePage({
           </div>
         </div>
 
-        <div className="card" style={{ marginTop: 12 }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-            <h2 style={{ margin: 0 }}>Piano fatturazione / SAL</h2>
-            <div className="muted">
-              Quando lo stato pratica coincide col trigger, la voce passa a “Fattura da inviare”
-            </div>
-          </div>
-
-          {Array.from({ length: Math.max(billingSteps.length, 6) }).map((_, i) => {
-            const current = billingSteps[i];
-
-            return (
-              <div
-                key={current?.id ?? `new-${i}`}
-                style={{
-                  marginTop: 12,
-                  paddingTop: 12,
-                  borderTop: i === 0 ? "none" : "1px solid rgba(0,0,0,0.08)",
-                }}
-              >
-                <input type="hidden" name="billingStepId" value={current?.id ?? ""} />
-                <input
-                  type="hidden"
-                  name="billingStepSortOrder"
-                  value={String(current?.sortOrder ?? i + 1)}
-                />
-
-                <div className="grid2">
-                  <div>
-                    <label>Voce SAL {i + 1}</label>
-                    <input
-                      className="input"
-                      name="billingStepLabel"
-                      defaultValue={current?.label ?? ""}
-                      placeholder="Es. Accettazione / Primo acconto / SAL 1 / Saldo"
-                    />
-                  </div>
-
-                  <div>
-                    <label>Tipo</label>
-                    <select
-                      className="input"
-                      name="billingStepType"
-                      defaultValue={current?.billingType ?? "ALTRO"}
-                    >
-                      <option value="ACCETTAZIONE">Accettazione</option>
-                      <option value="PRIMO_ACCONTO">Primo acconto</option>
-                      <option value="SECONDO_ACCONTO">Secondo acconto</option>
-                      <option value="SALDO">Saldo</option>
-                      <option value="ALTRO">Altro</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid2" style={{ marginTop: 12 }}>
-                  <div>
-                    <label>Importo (€)</label>
-                    <input
-                      className="input"
-                      name="billingStepAmountEur"
-                      defaultValue={fmtMoneyInput(current?.amountEur)}
-                      placeholder="Es. 500"
-                    />
-                  </div>
-
-                  <div>
-                    <label>Trigger stato pratica</label>
-                    <select
-                      className="input"
-                      name="billingStepTriggerStatus"
-                      defaultValue={current?.triggerStatus ?? ""}
-                    >
-                      <option value="">Nessuno</option>
-                      <option value="IN_ATTESA">In attesa</option>
-                      <option value="INVIATA_REGIONE">Inviata Regione</option>
-                      <option value="INIZIO_LAVORI">Inizio lavori</option>
-                      <option value="ACCETTATO">Accettato</option>
-                      <option value="ISPEZIONE_ASL">Ispezione ASL</option>
-                      <option value="CONCLUSO">Concluso</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid2" style={{ marginTop: 12 }}>
-                  <div>
-                    <label>Stato fattura</label>
-                    <select
-                      className="input"
-                      name="billingStepStatus"
-                      defaultValue={current?.billingStatus ?? "DA_FATTURARE"}
-                    >
-                      <option value="DA_FATTURARE">Da fatturare</option>
-                      <option value="FATTURA_DA_INVIARE">Fattura da inviare</option>
-                      <option value="FATTURATA">Fatturata</option>
-                      <option value="INCASSATA">Incassata</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label>N. fattura</label>
-                    <input
-                      className="input"
-                      name="billingStepInvoiceNumber"
-                      defaultValue={current?.invoiceNumber ?? ""}
-                      placeholder="Es. 45/2026"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid2" style={{ marginTop: 12 }}>
-                  <div>
-                    <label>Data fattura</label>
-                    <input
-                      className="input"
-                      type="date"
-                      name="billingStepInvoiceDate"
-                      defaultValue={fmtIso(current?.invoiceDate ?? null)}
-                    />
-                  </div>
-
-                  <div>
-                    <label>Data incasso</label>
-                    <input
-                      className="input"
-                      type="date"
-                      name="billingStepPaidAt"
-                      defaultValue={fmtIso(current?.paidAt ?? null)}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <label>Note SAL</label>
-                  <input
-                    className="input"
-                    name="billingStepNotes"
-                    defaultValue={current?.notes ?? ""}
-                    placeholder="Facoltative"
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
         <div style={{ marginTop: 12 }}>
           <label>Note</label>
           <textarea className="input" name="notes" rows={5} defaultValue={notesParts.cleanNotes} />
@@ -689,7 +375,7 @@ export default async function EditPracticePage({
             Salva
           </button>
 
-          <Link className="btn" href={`/clients/${params.id}`}>
+          <Link className="btn" href={`/clients/${params.id}/practices/${params.practiceId}`}>
             Annulla
           </Link>
 

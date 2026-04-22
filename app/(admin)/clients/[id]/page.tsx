@@ -173,8 +173,8 @@ function normalizeEconomicPayload(raw: any) {
       raw.accontoYear == null || raw.accontoYear === ""
         ? null
         : Number.isFinite(Number(raw.accontoYear))
-        ? Number(raw.accontoYear)
-        : null,
+          ? Number(raw.accontoYear)
+          : null,
     accontoNotes: raw.accontoNotes ? String(raw.accontoNotes) : null,
     saldoEur: raw.saldoEur == null || raw.saldoEur === "" ? null : toNum(raw.saldoEur),
     saldoDate: raw.saldoDate ? String(raw.saldoDate) : null,
@@ -182,8 +182,8 @@ function normalizeEconomicPayload(raw: any) {
       raw.saldoYear == null || raw.saldoYear === ""
         ? null
         : Number.isFinite(Number(raw.saldoYear))
-        ? Number(raw.saldoYear)
-        : null,
+          ? Number(raw.saldoYear)
+          : null,
     saldoNotes: raw.saldoNotes ? String(raw.saldoNotes) : null,
     paymentRows: Array.isArray(raw.paymentRows) ? raw.paymentRows : [],
   };
@@ -326,26 +326,26 @@ function getBillingSummary(p: any) {
     .filter((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "INCASSATA")
     .reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
 
-  let mainStatus = "—";
+  const normalizedSteps = steps.map((row: any) => ({
+    ...row,
+    billingStatusUpper: String(row?.billingStatus ?? "").trim().toUpperCase(),
+    triggerStatusUpper: String(row?.triggerStatus ?? "").trim().toUpperCase(),
+  }));
 
-  if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURA_DA_INVIARE")) {
-    mainStatus = "FATTURA_DA_INVIARE";
-  } else if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "DA_FATTURARE")) {
-    mainStatus = "DA_FATTURARE";
-  } else if (steps.some((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "FATTURATA")) {
-    mainStatus = "FATTURATA";
-  } else if (
-    steps.length > 0 &&
-    steps.every((row: any) => String(row?.billingStatus ?? "").trim().toUpperCase() === "INCASSATA")
-  ) {
-    mainStatus = "INCASSATA";
-  }
+  const activeStep =
+    normalizedSteps.find(
+      (row: any) => !["FATTURATA", "INCASSATA"].includes(row.billingStatusUpper)
+    ) ??
+    normalizedSteps.find((row: any) => row.billingStatusUpper === "FATTURATA") ??
+    normalizedSteps.find((row: any) => row.billingStatusUpper === "INCASSATA") ??
+    null;
 
   return {
     fatturato,
     incassato,
     count: steps.length,
-    mainStatus,
+    activeTriggerStatus: activeStep?.triggerStatusUpper || "",
+    activeBillingStatus: activeStep?.billingStatusUpper || "—",
   };
 }
 
@@ -1103,23 +1103,41 @@ export default async function ClientDetailPage({
                     <td>{practiceAmount > 0 ? eur(practiceAmount) : "—"}</td>
                     <td>{billing.incassato > 0 ? eur(billing.incassato) : "—"}</td>
                     <td>
-                      {billing.mainStatus !== "—" ? (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "4px 10px",
-                            borderRadius: 999,
-                            fontSize: 12,
-                            fontWeight: 800,
-                            ...billingStatusStyle(billing.mainStatus),
-                          }}
-                        >
-                          {billingStatusLabel(billing.mainStatus)}
-                        </span>
-                      ) : (
-                        <span className={fatt.cls}>{fatt.label}</span>
-                      )}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                        {billing.activeTriggerStatus ? (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 800,
+                              ...practiceStatusBadgeStyle(billing.activeTriggerStatus),
+                            }}
+                          >
+                            {getPracticeStatusLabel(billing.activeTriggerStatus)}
+                          </span>
+                        ) : null}
+
+                        {billing.activeBillingStatus !== "—" ? (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 800,
+                              ...billingStatusStyle(billing.activeBillingStatus),
+                            }}
+                          >
+                            {billingStatusLabel(billing.activeBillingStatus)}
+                          </span>
+                        ) : (
+                          <span className={fatt.cls}>{fatt.label}</span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <Link className="btn" href={`/clients/${client.id}/practices/${p.id}`}>

@@ -107,10 +107,7 @@ function isStaticPath(pathname: string) {
 }
 
 function isPublicApi(pathname: string) {
-  return (
-    pathname === "/api/login" ||
-    pathname === "/api/logout"
-  );
+  return pathname === "/api/login" || pathname === "/api/logout";
 }
 
 function isStaffBlockedPath(pathname: string) {
@@ -122,7 +119,7 @@ function isStaffBlockedPath(pathname: string) {
   );
 }
 
-function isStaffBlockedApi(pathname: string) {
+function isSensitiveApi(pathname: string) {
   return (
     pathname.startsWith("/api/import-export") ||
     pathname.startsWith("/api/backup") ||
@@ -135,10 +132,6 @@ function isIngegnereAllowedPath(pathname: string) {
     pathname === "/ingegneria-clinica" ||
     pathname.startsWith("/ingegneria-clinica/")
   );
-}
-
-function isIngegnereAllowedApi(pathname: string) {
-  return pathname.startsWith("/api/ingegneria-clinica");
 }
 
 export async function middleware(req: NextRequest) {
@@ -188,7 +181,7 @@ export async function middleware(req: NextRequest) {
   }
 
   if (session.role === "staff") {
-    if (isApi && isStaffBlockedApi(pathname)) {
+    if (isApi && isSensitiveApi(pathname)) {
       return NextResponse.json({ error: "Accesso negato" }, { status: 403 });
     }
 
@@ -198,14 +191,12 @@ export async function middleware(req: NextRequest) {
   }
 
   if (session.role === "ingegnere_clinico") {
-    if (isApi) {
-      if (!isIngegnereAllowedApi(pathname)) {
-        return NextResponse.json({ error: "Accesso negato" }, { status: 403 });
-      }
-    } else {
-      if (!isIngegnereAllowedPath(pathname)) {
-        return redirectTo(req, "/ingegneria-clinica");
-      }
+    if (isApi && isSensitiveApi(pathname)) {
+      return NextResponse.json({ error: "Accesso negato" }, { status: 403 });
+    }
+
+    if (!isApi && !isIngegnereAllowedPath(pathname)) {
+      return redirectTo(req, "/ingegneria-clinica");
     }
   }
 

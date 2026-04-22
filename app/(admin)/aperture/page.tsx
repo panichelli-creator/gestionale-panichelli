@@ -140,6 +140,14 @@ function billingStatusStyle(v: string | null | undefined) {
   };
 }
 
+function salLabelBadgeStyle() {
+  return {
+    background: "rgba(0,0,0,0.04)",
+    color: "rgba(0,0,0,0.72)",
+    border: "1px solid rgba(0,0,0,0.12)",
+  };
+}
+
 function getBillingSummary(p: any) {
   const steps = Array.isArray(p?.billingSteps) ? p.billingSteps : [];
 
@@ -155,9 +163,29 @@ function getBillingSummary(p: any) {
 
   const normalizedSteps = steps.map((row: any) => ({
     ...row,
+    labelText: String(row?.label ?? "").trim(),
     billingStatusUpper: String(row?.billingStatus ?? "").trim().toUpperCase(),
     triggerStatusUpper: String(row?.triggerStatus ?? "").trim().toUpperCase(),
   }));
+
+  const allIncassata =
+    normalizedSteps.length > 0 &&
+    normalizedSteps.every((row: any) => row.billingStatusUpper === "INCASSATA");
+
+  if (allIncassata) {
+    const lastStep = normalizedSteps[normalizedSteps.length - 1];
+
+    return {
+      fatturato,
+      incassato,
+      count: steps.length,
+      allIncassata: true,
+      activeTriggerStatus: "CONCLUSO",
+      activeBillingStatus: "INCASSATA",
+      salStageText: lastStep?.labelText || "Saldo",
+      salStageMode: "label" as const,
+    };
+  }
 
   const activeStep =
     normalizedSteps.find(
@@ -171,9 +199,20 @@ function getBillingSummary(p: any) {
     fatturato,
     incassato,
     count: steps.length,
+    allIncassata: false,
     activeTriggerStatus: activeStep?.triggerStatusUpper || "",
     activeBillingStatus: activeStep?.billingStatusUpper || "—",
+    salStageText: activeStep?.triggerStatusUpper
+      ? getPracticeStatusLabel(activeStep.triggerStatusUpper)
+      : activeStep?.labelText || "",
+    salStageMode: activeStep?.triggerStatusUpper ? ("trigger" as const) : ("label" as const),
   };
+}
+
+function getEffectivePracticeStatus(p: any) {
+  const billing = getBillingSummary(p);
+  if (billing.allIncassata) return "CONCLUSO";
+  return normalizePracticeStatus(p?.apertureStatus);
 }
 
 function getPracticeAmount(p: any) {
@@ -284,8 +323,11 @@ export default async function AperturePage({
   ]);
 
   const rows = [...rawRows].sort((a: any, b: any) => {
-    const aConcluso = normalizePracticeStatus(a.apertureStatus) === "CONCLUSO" ? 1 : 0;
-    const bConcluso = normalizePracticeStatus(b.apertureStatus) === "CONCLUSO" ? 1 : 0;
+    const aEffectiveStatus = getEffectivePracticeStatus(a);
+    const bEffectiveStatus = getEffectivePracticeStatus(b);
+
+    const aConcluso = aEffectiveStatus === "CONCLUSO" ? 1 : 0;
+    const bConcluso = bEffectiveStatus === "CONCLUSO" ? 1 : 0;
     if (aConcluso !== bConcluso) return aConcluso - bConcluso;
 
     let cmp = 0;
@@ -295,8 +337,8 @@ export default async function AperturePage({
     } else if (sort === "practice") {
       cmp = String(a.title ?? "").localeCompare(String(b.title ?? ""), "it");
     } else if (sort === "status") {
-      cmp = getPracticeStatusLabel(a.apertureStatus).localeCompare(
-        getPracticeStatusLabel(b.apertureStatus),
+      cmp = getPracticeStatusLabel(aEffectiveStatus).localeCompare(
+        getPracticeStatusLabel(bEffectiveStatus),
         "it"
       );
     } else {
@@ -316,13 +358,13 @@ export default async function AperturePage({
   });
 
   const apertureTotal = rows.filter((r: any) => r.inApertureList).length;
-  const inAttesa = rows.filter((r: any) => normalizePracticeStatus(r.apertureStatus) === "IN_ATTESA").length;
+  const inAttesa = rows.filter((r: any) => getEffectivePracticeStatus(r) === "IN_ATTESA").length;
   const inCorso = rows.filter((r: any) =>
     ["INVIATA_REGIONE", "INIZIO_LAVORI", "ACCETTATO", "ISPEZIONE_ASL"].includes(
-      normalizePracticeStatus(r.apertureStatus)
+      getEffectivePracticeStatus(r)
     )
   ).length;
-  const concluse = rows.filter((r: any) => normalizePracticeStatus(r.apertureStatus) === "CONCLUSO").length;
+  const concluse = rows.filter((r: any) => getEffectivePracticeStatus(r) === "CONCLUSO").length;
   const totaleImporti = rows.reduce((acc: number, r: any) => acc + getPracticeAmount(r), 0);
   const totaleFatturatoSal = rows.reduce((acc: number, r: any) => acc + getBillingSummary(r).fatturato, 0);
   const totaleIncassatoSal = rows.reduce((acc: number, r: any) => acc + getBillingSummary(r).incassato, 0);
@@ -509,6 +551,7 @@ export default async function AperturePage({
             {rows.map((p: any) => {
               const billing = getBillingSummary(p);
               const practiceAmount = getPracticeAmount(p);
+              const effectiveStatus = getEffectivePracticeStatus(p);
 
               return (
                 <tr key={p.id}>
@@ -529,10 +572,10 @@ export default async function AperturePage({
                         borderRadius: 999,
                         fontSize: 12,
                         fontWeight: 800,
-                        ...practiceStatusBadgeStyle(p.apertureStatus),
+                        ...practiceStatusBadgeStyle(effectiveStatus),
                       }}
                     >
-                      {getPracticeStatusLabel(p.apertureStatus)}
+                      {getPracticeStatusLabel(effectiveStatus)}
                     </span>
                   </td>
                   <td>{p.inApertureList ? "SI" : "NO"}</td>
@@ -540,7 +583,7 @@ export default async function AperturePage({
                   <td>{billing.incassato > 0 ? eur(billing.incassato) : "—"}</td>
                   <td>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
-                      {billing.activeTriggerStatus ? (
+                      {billing.salStageText ? (
                         <span
                           style={{
                             display: "inline-flex",
@@ -549,10 +592,12 @@ export default async function AperturePage({
                             borderRadius: 999,
                             fontSize: 12,
                             fontWeight: 800,
-                            ...practiceStatusBadgeStyle(billing.activeTriggerStatus),
+                            ...(billing.salStageMode === "trigger"
+                              ? practiceStatusBadgeStyle(billing.activeTriggerStatus)
+                              : salLabelBadgeStyle()),
                           }}
                         >
-                          {getPracticeStatusLabel(billing.activeTriggerStatus)}
+                          {billing.salStageText}
                         </span>
                       ) : null}
 

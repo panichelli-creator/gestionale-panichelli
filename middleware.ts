@@ -5,6 +5,12 @@ const COOKIE_NAME = "phsc_session";
 
 type SessionRole = "admin" | "staff" | "ingegnere_clinico";
 
+type SessionPayload = {
+  uid: string;
+  role: SessionRole;
+  exp: number;
+};
+
 function b64urlToUint8Array(s: string) {
   const pad = 4 - (s.length % 4 || 4);
   const base64 = s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat(pad);
@@ -19,38 +25,59 @@ function b64urlToString(s: string) {
   return new TextDecoder().decode(bytes);
 }
 
-async function verifyToken(token: string, secret: string) {
-  const parts = token.split(".");
-  if (parts.length !== 2) return null;
-  const [payloadB64, sigB64] = parts;
+async function verifyToken(token: string, secret: string): Promise<SessionPayload | null> {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 2) return null;
 
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["verify"]
-  );
+    const [payloadB64, sigB64] = parts;
+    if (!payloadB64 || !sigB64) return null;
 
-  const ok = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    b64urlToUint8Array(sigB64),
-    new TextEncoder().encode(payloadB64)
-  );
-  if (!ok) return null;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
 
-  const payloadJson = b64urlToString(payloadB64);
-  const payload = JSON.parse(payloadJson);
+    const ok = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      b64urlToUint8Array(sigB64),
+      new TextEncoder().encode(payloadB64)
+    );
+    if (!ok) return null;
 
-  const exp = Number(payload?.exp ?? 0);
-  if (!payload?.uid || !payload?.role || !exp) return null;
-  if (exp < Math.floor(Date.now() / 1000)) return null;
+    const payloadJson = b64urlToString(payloadB64);
+    const payload = JSON.parse(payloadJson);
 
-  const role = String(payload.role) as SessionRole;
-  if (!["admin", "staff", "ingegnere_clinico"].includes(role)) return null;
+    const exp = Number(payload?.exp ?? 0);
+    if (!payload?.uid || !payload?.role || !exp) return null;
+    if (exp < Math.floor(Date.now() / 1000)) return null;
 
-  return payload as { uid: string; role: SessionRole; exp: number };
+    const role = String(payload.role) as SessionRole;
+    if (!["admin", "staff", "ingegnere_clinico"].includes(role)) return null;
+
+    return {
+      uid: String(payload.uid),
+      role,
+      exp,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearSession(res: NextResponse) {
+  res.cookies.set(COOKIE_NAME, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+  return res;
 }
 
 function redirectTo(req: NextRequest, pathname: string) {
@@ -66,18 +93,83 @@ function homeByRole(role: SessionRole) {
   return "/dashboard";
 }
 
+function isStaticPath(pathname: string) {
+  return (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon") ||
+    pathname.startsWith("/logo") ||
+    pathname.startsWith("/images") ||
+    pathname.startsWith("/icons") ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml" ||
+    pathname === "/manifest.json"
+  );
+}
+
+function isPublicApi(pathname: string) {
+  return (
+    pathname === "/api/login" ||
+    pathname === "/api/logout"
+  );
+}
+
+function isStaffBlockedPath(pathname: string) {
+  return (
+    pathname === "/dashboard" ||
+    pathname.startsWith("/backup") ||
+    pathname.startsWith("/users") ||
+    pathname.startsWith("/import-export")
+  );
+}
+
+function isStaffBlockedApi(pathname: string) {
+  return (
+    pathname.startsWith("/api/import-export") ||
+    pathname.startsWith("/api/backup") ||
+    pathname.startsWith("/api/users")
+  );
+}
+
+function isIngegnereAllowedPath(pathname: string) {
+  return (
+    pathname === "/ingegneria-clinica" ||
+    pathname.startsWith("/ingegneria-clinica/")
+  );
+}
+
+function isIngegnereAllowedApi(pathname: string) {
+  return pathname.startsWith("/api/ingegneria-clinica");
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  const isStatic =
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon") ||
-    pathname.startsWith("/logo");
-
-  const isApi = pathname.startsWith("/api");
+  const isStatic = isStaticPath(pathname);
   const isLogin = pathname === "/login";
+  const isApi = pathname.startsWith("/api");
+  const publicApi = isPublicApi(pathname);
 
-  if (isStatic || isApi) {
+  if (isStatic) {
+    return NextResponse.next();
+  }
+
+  if (isLogin) {
+    const token = req.cookies.get(COOKIE_NAME)?.value;
+    const secret = process.env.AUTH_SECRET || "";
+    const session = token && secret ? await verifyToken(token, secret) : null;
+
+    if (session) {
+      return redirectTo(req, homeByRole(session.role));
+    }
+
+    if (token) {
+      return clearSession(NextResponse.next());
+    }
+
+    return NextResponse.next();
+  }
+
+  if (isApi && publicApi) {
     return NextResponse.next();
   }
 
@@ -85,36 +177,35 @@ export async function middleware(req: NextRequest) {
   const secret = process.env.AUTH_SECRET || "";
   const session = token && secret ? await verifyToken(token, secret) : null;
 
-  if (isLogin) {
-    if (session) {
-      return redirectTo(req, homeByRole(session.role));
-    }
-    return NextResponse.next();
-  }
-
   if (!session) {
-    return redirectTo(req, "/login");
+    if (isApi) {
+      const res = NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
+      return clearSession(res);
+    }
+
+    const res = redirectTo(req, "/login");
+    return clearSession(res);
   }
 
   if (session.role === "staff") {
-    const blockedForStaff =
-      pathname === "/dashboard" ||
-      pathname.startsWith("/backup") ||
-      pathname.startsWith("/users") ||
-      pathname.startsWith("/import-export");
+    if (isApi && isStaffBlockedApi(pathname)) {
+      return NextResponse.json({ error: "Accesso negato" }, { status: 403 });
+    }
 
-    if (blockedForStaff) {
+    if (!isApi && isStaffBlockedPath(pathname)) {
       return redirectTo(req, "/clients");
     }
   }
 
   if (session.role === "ingegnere_clinico") {
-    const allowed =
-      pathname === "/ingegneria-clinica" ||
-      pathname.startsWith("/ingegneria-clinica/");
-
-    if (!allowed) {
-      return redirectTo(req, "/ingegneria-clinica");
+    if (isApi) {
+      if (!isIngegnereAllowedApi(pathname)) {
+        return NextResponse.json({ error: "Accesso negato" }, { status: 403 });
+      }
+    } else {
+      if (!isIngegnereAllowedPath(pathname)) {
+        return redirectTo(req, "/ingegneria-clinica");
+      }
     }
   }
 

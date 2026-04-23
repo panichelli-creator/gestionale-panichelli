@@ -280,11 +280,13 @@ export default function ChecksTableClient({
     setRole(getRoleFromSessionCookie());
   }, []);
 
-  useEffect(() => {
-    return () => {
-      Object.values(saveTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
-    };
-  }, []);
+ useEffect(() => {
+  const timers = saveTimersRef.current;
+
+  return () => {
+    Object.values(timers).forEach((timerId) => window.clearTimeout(timerId));
+  };
+}, []);
 
   function setRowSaveState(id: string, state: SaveState) {
     setSaveStates((curr) => ({ ...curr, [id]: state }));
@@ -1346,4 +1348,4 @@ export default function ChecksTableClient({
       `}</style>
     </>
   );
-}nelle 
+}

@@ -126,6 +126,7 @@ function practiceStatusBadgeStyle(v: string | null | undefined) {
 function billingStatusLabel(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
 
+  if (s === "-" || s === "NONE") return "-";
   if (s === "DA_FATTURARE") return "Da fatturare";
   if (s === "FATTURA_DA_INVIARE") return "Fattura da inviare";
   if (s === "FATTURATA") return "Fatturata";
@@ -136,6 +137,14 @@ function billingStatusLabel(v: string | null | undefined) {
 
 function billingStatusBadgeStyle(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
+
+  if (s === "-" || s === "NONE") {
+    return {
+      background: "rgba(0,0,0,0.04)",
+      color: "rgba(0,0,0,0.60)",
+      border: "1px dashed rgba(0,0,0,0.18)",
+    };
+  }
 
   if (s === "INCASSATA") {
     return {
@@ -558,7 +567,8 @@ export default async function PracticeDetailPage({
       const label = stepLabels[i] || "";
       const triggerStatus = stepTriggers[i] || null;
       const amountEurStep = toNum(stepAmounts[i]);
-      const billingStatus = stepStatuses[i] || "DA_FATTURARE";
+      const rawBillingStatus = String(stepStatuses[i] || "").trim().toUpperCase();
+      const billingStatus = rawBillingStatus || "-";
       const invoiceNumber = stepInvoiceNumbers[i] || null;
       const invoiceDateInput = stepInvoiceDates[i]
         ? new Date(`${stepInvoiceDates[i]}T12:00:00`)
@@ -576,13 +586,15 @@ export default async function PracticeDetailPage({
         !invoiceNumber &&
         !invoiceDateInput &&
         !paidAtInput &&
-        !note;
+        !note &&
+        (billingStatus === "-" || billingStatus === "");
 
       if (isBlank) continue;
 
       if (id) incomingUsedIds.add(id);
 
       let nextBillingStatus = billingStatus;
+
       if (
         nextBillingStatus === "DA_FATTURARE" &&
         triggerStatus &&
@@ -601,6 +613,11 @@ export default async function PracticeDetailPage({
       if (nextBillingStatus === "INCASSATA") {
         if (!invoiceDate) invoiceDate = new Date();
         if (!paidAt) paidAt = new Date();
+      }
+
+      if (nextBillingStatus === "-") {
+        invoiceDate = null;
+        paidAt = null;
       }
 
       billingStepRows.push({
@@ -871,8 +888,9 @@ export default async function PracticeDetailPage({
                       <select
                         className="input sal-input"
                         name="billingStepStatus"
-                        defaultValue={current?.billingStatus ?? "DA_FATTURARE"}
+                        defaultValue={current?.billingStatus ?? "-"}
                       >
+                        <option value="-">-</option>
                         <option value="DA_FATTURARE">Da fatturare</option>
                         <option value="FATTURA_DA_INVIARE">Fattura da inviare</option>
                         <option value="FATTURATA">Fatturata</option>

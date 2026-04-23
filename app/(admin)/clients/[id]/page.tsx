@@ -1,3 +1,4 @@
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
@@ -495,11 +496,6 @@ export default async function ClientDetailPage({
           <Link className="btn" href="/clients">
             ← Clienti
           </Link>
-          {!isIngegnereClinico ? (
-            <Link className="btn" href={`/clients/${client.id}/edit`}>
-              Modifica
-            </Link>
-          ) : null}
         </div>
       </div>
 

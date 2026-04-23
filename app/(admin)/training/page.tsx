@@ -1,5 +1,5 @@
 import Link from "next/link";
-import PrintButton from "./PrintButton";
+import PrintButton from "@/components/PrintButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

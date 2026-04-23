@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PrintButton from "@/components/PrintButton";
 import { markBilledMonthly, markWorkedMonthly } from "@/app/actions/monthly-work";
 
 export const dynamic = "force-dynamic";
@@ -320,6 +321,7 @@ export default async function MonthlyWorkPage({
         <h1>Lavori mensili</h1>
 
         <div className="row no-print" style={{ gap: 8 }}>
+          <PrintButton />
           <Link className="btn" href="/clients">
             Clienti
           </Link>

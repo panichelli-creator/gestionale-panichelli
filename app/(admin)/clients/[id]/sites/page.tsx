@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-
+import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const runtime = "nodejs";
 
 export default async function ClientSitesPage({
   params,
@@ -13,6 +14,7 @@ export default async function ClientSitesPage({
   searchParams?: { err?: string; ok?: string };
 }) {
   const { prisma } = await import("@/lib/prisma");
+
   const client = await prisma.client.findUnique({
     where: { id: params.id },
   });
@@ -20,6 +22,7 @@ export default async function ClientSitesPage({
   if (!client) return notFound();
 
   const clientId = client.id;
+  const basePath = `/clients/${clientId}/sites`;
 
   const sites = await prisma.clientSite.findMany({
     where: { clientId },
@@ -29,7 +32,19 @@ export default async function ClientSitesPage({
   async function createSite(formData: FormData) {
     "use server";
 
-    const clientId = params.id;
+    const { prisma } = await import("@/lib/prisma");
+
+    const clientId = String(params.id);
+    const basePath = `/clients/${clientId}/sites`;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      select: { id: true },
+    });
+
+    if (!client) {
+      redirect("/clients");
+    }
 
     const name = String(formData.get("name") ?? "").trim();
     const address = String(formData.get("address") ?? "").trim() || null;
@@ -39,9 +54,7 @@ export default async function ClientSitesPage({
     const notes = String(formData.get("notes") ?? "").trim() || null;
 
     if (!name) {
-      redirect(
-        `/clients/${clientId}/sites?err=${encodeURIComponent("Nome sede obbligatorio")}`
-      );
+      redirect(`${basePath}?err=${encodeURIComponent("Nome sede obbligatorio")}`);
     }
 
     const existingSites = await prisma.clientSite.findMany({
@@ -49,14 +62,13 @@ export default async function ClientSitesPage({
       select: { id: true, name: true },
     });
 
-    const nameUpper = name.toUpperCase();
-    const duplicate = existingSites.find((s) => s.name.toUpperCase() === nameUpper);
+    const duplicate = existingSites.find(
+      (s) => String(s.name ?? "").trim().toUpperCase() === name.toUpperCase()
+    );
 
     if (duplicate) {
       redirect(
-        `/clients/${clientId}/sites?err=${encodeURIComponent(
-          `Sede già esistente: "${duplicate.name}"`
-        )}`
+        `${basePath}?err=${encodeURIComponent(`Sede già esistente: "${duplicate.name}"`)}`
       );
     }
 
@@ -74,22 +86,27 @@ export default async function ClientSitesPage({
       });
     } catch (e: any) {
       redirect(
-        `/clients/${clientId}/sites?err=${encodeURIComponent(
-          e?.message ?? "Errore creazione sede"
-        )}`
+        `${basePath}?err=${encodeURIComponent(e?.message ?? "Errore creazione sede")}`
       );
     }
 
-    redirect(`/clients/${clientId}/sites?ok=${encodeURIComponent("Sede creata")}`);
+    revalidatePath(basePath);
+    revalidatePath(`/clients/${clientId}`);
+    redirect(`${basePath}?ok=${encodeURIComponent("Sede creata")}`);
   }
 
   async function deleteSite(formData: FormData) {
     "use server";
 
-    const clientId = params.id;
+    const { prisma } = await import("@/lib/prisma");
+
+    const clientId = String(params.id);
+    const basePath = `/clients/${clientId}/sites`;
     const siteId = String(formData.get("siteId") ?? "").trim();
 
-    if (!siteId) redirect(`/clients/${clientId}/sites`);
+    if (!siteId) {
+      redirect(basePath);
+    }
 
     try {
       await prisma.clientSite.delete({
@@ -97,13 +114,13 @@ export default async function ClientSitesPage({
       });
     } catch (e: any) {
       redirect(
-        `/clients/${clientId}/sites?err=${encodeURIComponent(
-          e?.message ?? "Errore eliminazione sede"
-        )}`
+        `${basePath}?err=${encodeURIComponent(e?.message ?? "Errore eliminazione sede")}`
       );
     }
 
-    redirect(`/clients/${clientId}/sites?ok=${encodeURIComponent("Sede eliminata")}`);
+    revalidatePath(basePath);
+    revalidatePath(`/clients/${clientId}`);
+    redirect(`${basePath}?ok=${encodeURIComponent("Sede eliminata")}`);
   }
 
   return (

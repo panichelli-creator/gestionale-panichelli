@@ -1,7 +1,12 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+type SP = {
+  err?: string;
+};
 
 async function createClient(formData: FormData) {
   "use server";
@@ -23,39 +28,96 @@ async function createClient(formData: FormData) {
 
   const marketingList = String(formData.get("marketingList") || "").trim() || null;
 
-  if (!name) throw new Error("Nome obbligatorio");
+  if (!name) {
+    redirect(`/clients/new?err=${encodeURIComponent("Nome obbligatorio")}`);
+  }
 
-  const client = await prisma.client.create({
-    data: {
-      name,
-      type: type as any,
-      phone,
-      email,
-      pec,
-      occupationalDoctorName,
-      contacts: contactName
-        ? {
-            create: {
-              name: contactName,
-              phone: contactPhone,
-              email: contactEmail,
-              role: contactRole,
-              ...(marketingList ? { marketingList } : {}),
-            },
-          }
-        : undefined,
-    },
+  const existing = await prisma.client.findUnique({
+    where: { name },
+    select: { id: true, name: true },
   });
 
-  redirect(`/clients/${client.id}`);
+  if (existing) {
+    redirect(
+      `/clients/new?err=${encodeURIComponent(`Cliente già esistente: "${existing.name}"`)}`
+    );
+  }
+
+  try {
+    const client = await prisma.client.create({
+      data: {
+        name,
+        type: type as any,
+        phone,
+        email,
+        pec,
+        occupationalDoctorName,
+        contacts: contactName
+          ? {
+              create: {
+                name: contactName,
+                phone: contactPhone,
+                email: contactEmail,
+                role: contactRole,
+                ...(marketingList ? { marketingList } : {}),
+              },
+            }
+          : undefined,
+      },
+    });
+
+    redirect(`/clients/${client.id}`);
+  } catch (e: any) {
+    if (e?.code === "P2002") {
+      redirect(
+        `/clients/new?err=${encodeURIComponent(`Cliente già esistente: "${name}"`)}`
+      );
+    }
+
+    redirect(
+      `/clients/new?err=${encodeURIComponent(e?.message ?? "Errore creazione cliente")}`
+    );
+  }
 }
 
-export default async function NewClientPage() {
+export default async function NewClientPage({
+  searchParams,
+}: {
+  searchParams?: SP;
+}) {
+  const err = searchParams?.err ? decodeURIComponent(searchParams.err) : "";
+
   return (
     <div className="card">
-      <h1>Nuovo cliente</h1>
+      <div
+        className="row"
+        style={{ justifyContent: "space-between", alignItems: "center" }}
+      >
+        <h1>Nuovo cliente</h1>
 
-      <form action={createClient}>
+        <div className="row" style={{ gap: 8 }}>
+          <Link className="btn" href="/clients">
+            ← Clienti
+          </Link>
+          <Link className="btn" href="/clients/new">
+            Reset
+          </Link>
+        </div>
+      </div>
+
+      {err ? (
+        <div
+          className="card"
+          style={{
+            marginTop: 12,
+            border: "1px solid #ff6b6b",
+          }}
+        >
+          <b style={{ color: "#ff6b6b" }}>Errore:</b> {err}
+        </div>
+      ) : null}
+
+      <form action={createClient} className="card" style={{ marginTop: 12 }}>
         <div className="grid2">
           <div>
             <label>Nome azienda / cliente</label>
@@ -64,7 +126,7 @@ export default async function NewClientPage() {
 
           <div>
             <label>Tipologia attività</label>
-            <select name="type" defaultValue="ALTRO">
+            <select className="input" name="type" defaultValue="ALTRO">
               <option value="STUDIO_ODONTOIATRICO">Studio odontoiatrico</option>
               <option value="STUDIO_ODONT_447">Studio odont. 447</option>
               <option value="AMBULATORIO_ODONTOIATRICO">Ambulatorio odontoiatrico</option>
@@ -147,10 +209,14 @@ export default async function NewClientPage() {
           </div>
         </div>
 
-        <div className="row" style={{ marginTop: 14 }}>
+        <div className="row" style={{ marginTop: 14, gap: 8 }}>
           <button className="btn primary" type="submit">
             Salva
           </button>
+
+          <Link className="btn" href="/clients">
+            Annulla
+          </Link>
         </div>
       </form>
     </div>

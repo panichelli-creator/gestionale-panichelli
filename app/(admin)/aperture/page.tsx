@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PrintButton from "@/components/PrintButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -425,6 +426,14 @@ export default async function AperturePage({
 
   return (
     <div className="card">
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          a { color: #000 !important; text-decoration: none !important; }
+          .card { box-shadow: none !important; border: none !important; }
+        }
+      `}</style>
+
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <div>
           <h1 style={{ margin: 0 }}>Aperture</h1>
@@ -433,7 +442,8 @@ export default async function AperturePage({
           </div>
         </div>
 
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <div className="row no-print" style={{ gap: 8, flexWrap: "wrap" }}>
+          <PrintButton />
           <Link className="btn" href="/clients">
             Clienti
           </Link>
@@ -443,7 +453,7 @@ export default async function AperturePage({
         </div>
       </div>
 
-      <form method="GET" className="card" style={{ marginTop: 12 }}>
+      <form method="GET" className="card no-print" style={{ marginTop: 12 }}>
         <input type="hidden" name="sort" value={sort} />
         <input type="hidden" name="dir" value={dir} />
 
@@ -544,7 +554,7 @@ export default async function AperturePage({
               <th>Importo</th>
               <th>Incassato</th>
               <th>Stato SAL</th>
-              <th>Apri</th>
+              <th className="no-print">Apri</th>
             </tr>
           </thead>
           <tbody>
@@ -620,7 +630,7 @@ export default async function AperturePage({
                       )}
                     </div>
                   </td>
-                  <td>
+                  <td className="no-print">
                     <Link className="btn" href={`/clients/${p.clientId}/practices/${p.id}`}>
                       Apri
                     </Link>

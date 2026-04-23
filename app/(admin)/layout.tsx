@@ -24,7 +24,6 @@ import {
   Database,
   DoorOpen,
   Map,
-  Receipt,
 } from "lucide-react";
 
 const FONT =
@@ -291,12 +290,6 @@ function Sidebar({
         roles: ["admin", "staff"],
       },
       {
-        href: "/pratiche-fatturazione",
-        label: "Pratiche fatturazione",
-        icon: Receipt,
-        roles: ["admin", "staff"],
-      },
-      {
         href: "/map",
         label: "MAP",
         icon: Map,
@@ -545,9 +538,6 @@ function Sidebar({
               </Link>
               <Link className="btn" href="/aperture">
                 Vai ad Aperture
-              </Link>
-              <Link className="btn" href="/pratiche-fatturazione">
-                Vai a Fatturazione pratiche
               </Link>
             </div>
 

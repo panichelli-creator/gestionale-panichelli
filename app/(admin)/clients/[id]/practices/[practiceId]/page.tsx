@@ -123,26 +123,6 @@ function practiceStatusBadgeStyle(v: string | null | undefined) {
   };
 }
 
-function fatturazioneLabel(v: boolean | null | undefined) {
-  return v ? "Fatturata" : "Da fatturare";
-}
-
-function fatturazioneBadgeStyle(v: boolean | null | undefined) {
-  if (v) {
-    return {
-      background: "rgba(34,197,94,0.12)",
-      color: "#166534",
-      border: "1px solid rgba(34,197,94,0.30)",
-    };
-  }
-
-  return {
-    background: "rgba(245,158,11,0.12)",
-    color: "#92400e",
-    border: "1px solid rgba(245,158,11,0.30)",
-  };
-}
-
 function billingStatusLabel(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
 
@@ -770,32 +750,6 @@ export default async function PracticeDetailPage({
             <div>
               <b>{totalPracticeAmount > 0 ? fmtEur(totalPracticeAmount) : "—"}</b>
             </div>
-          </div>
-
-          <div>
-            <div className="muted">Fatturazione pratica</div>
-            <div>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  padding: "4px 10px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 800,
-                  ...fatturazioneBadgeStyle(Boolean(practiceAny.fatturata)),
-                }}
-              >
-                {fatturazioneLabel(Boolean(practiceAny.fatturata))}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid2" style={{ marginTop: 12 }}>
-          <div>
-            <div className="muted">Data fatturazione pratica</div>
-            <div>{fmt(practiceAny.fatturataAt)}</div>
           </div>
 
           <div>

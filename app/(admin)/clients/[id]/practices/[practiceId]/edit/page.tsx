@@ -233,7 +233,6 @@ export default async function EditPracticePage({
     const startYearRaw = String(formData.get("startYear") ?? "").trim();
     const startYear = startYearRaw ? Number(startYearRaw) : null;
     const notes = String(formData.get("notes") ?? "").trim() || null;
-    const fatturata = String(formData.get("fatturata") ?? "").trim() === "on";
 
     if (!title) {
       redirect(`/clients/${clientId}/practices/${practiceId}/edit`);
@@ -248,8 +247,6 @@ export default async function EditPracticePage({
         inApertureList,
         apertureStatus,
         startYear,
-        fatturata,
-        fatturataAt: fatturata ? new Date() : null,
         notes: buildNotesWithEconomic(notes, econ),
       },
     });
@@ -352,17 +349,6 @@ export default async function EditPracticePage({
             />
             <b>Aggiungi in lista Aperture</b>
           </label>
-        </div>
-
-        <div className="card" style={{ marginTop: 12, padding: 12 }}>
-          <label style={{ display: "flex", gap: 10 }}>
-            <input type="checkbox" name="fatturata" defaultChecked={Boolean(row.fatturata)} />
-            <b>Pratica fatturata</b>
-          </label>
-
-          <div className="muted" style={{ marginTop: 8 }}>
-            Se attiva, entra nel fatturato reale pratiche.
-          </div>
         </div>
 
         <div style={{ marginTop: 12 }}>

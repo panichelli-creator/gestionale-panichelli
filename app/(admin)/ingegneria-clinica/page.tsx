@@ -81,6 +81,32 @@ function hrefWith(params: {
   return q ? `/ingegneria-clinica?${q}` : "/ingegneria-clinica";
 }
 
+function normalizeText(v: any) {
+  return String(v ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatDateForSearch(value: Date | string | null | undefined) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+
+  return [
+    d.toLocaleDateString("it-IT"),
+    `${dd}/${mm}/${yyyy}`,
+    `${dd}-${mm}-${yyyy}`,
+    `${yyyy}-${mm}-${dd}`,
+  ].join(" ");
+}
+
 export default async function ClinicalEngineeringPage({
   searchParams,
 }: {
@@ -90,7 +116,7 @@ export default async function ClinicalEngineeringPage({
   const session = getSession();
   const isIngegnereClinico = session?.role === "ingegnere_clinico";
 
-  const q = String(searchParams?.q ?? "").trim().toLowerCase();
+  const q = normalizeText(searchParams?.q ?? "");
   const tab = String(searchParams?.tab ?? "TUTTE").trim().toUpperCase();
   const dueDate = String(searchParams?.dueDate ?? "").trim();
   const eseguite = String(searchParams?.eseguite ?? "").trim().toUpperCase();
@@ -116,22 +142,67 @@ export default async function ClinicalEngineeringPage({
   });
 
   const filtered = checks.filter((r: any) => {
-    const clientName = (r.client?.name ?? r.nomeClienteSnapshot ?? "").toLowerCase();
-    const siteName = (r.site?.name ?? r.nomeSedeSnapshot ?? "").toLowerCase();
-    const referente = String(r.referente ?? "").toLowerCase();
-    const appPresoText = r.dataAppuntamentoPreso
-      ? new Date(r.dataAppuntamentoPreso).toLocaleDateString("it-IT").toLowerCase()
-      : "";
+    const clientName = r.client?.name ?? r.nomeClienteSnapshot ?? "";
+    const clientEmail = r.client?.email ?? "";
+    const clientPhone = r.client?.phone ?? "";
+    const clientPec = r.client?.pec ?? "";
+    const clientVatNumber = r.client?.vatNumber ?? "";
+    const clientUniqueCode = r.client?.uniqueCode ?? "";
+    const clientAddress = r.client?.address ?? "";
+    const clientLegalSeat = r.client?.legalSeat ?? "";
+    const clientOperativeSeat = r.client?.operativeSeat ?? "";
+    const clientNotes = r.client?.notes ?? "";
 
-    const hay = [clientName, siteName, referente, appPresoText]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+    const siteName = r.site?.name ?? r.nomeSedeSnapshot ?? "";
+    const siteAddress = r.site?.address ?? "";
+    const siteCity = r.site?.city ?? "";
+    const siteProvince = r.site?.province ?? "";
+    const siteCap = r.site?.cap ?? "";
+    const siteSnapshotAddress = r.indirizzoSedeSnapshot ?? "";
+
+    const referente = r.referente ?? "";
+    const telefonoReferente = r.telefonoReferente ?? "";
+
+    const appPresoText = formatDateForSearch(r.dataAppuntamentoPreso);
+    const ultimoAppText = formatDateForSearch(r.dataUltimoAppuntamento);
+    const prossimoAppText = formatDateForSearch(r.dataProssimoAppuntamento);
+
+    const periodicita = r.periodicita ?? "";
+    const stato = getStatus(r.dataProssimoAppuntamento ?? null);
+
+    const hay = normalizeText(
+      [
+        clientName,
+        clientEmail,
+        clientPhone,
+        clientPec,
+        clientVatNumber,
+        clientUniqueCode,
+        clientAddress,
+        clientLegalSeat,
+        clientOperativeSeat,
+        clientNotes,
+        siteName,
+        siteAddress,
+        siteCity,
+        siteProvince,
+        siteCap,
+        siteSnapshotAddress,
+        referente,
+        telefonoReferente,
+        appPresoText,
+        ultimoAppText,
+        prossimoAppText,
+        periodicita,
+        stato,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
 
     if (q && !hay.includes(q)) return false;
 
-    const status = getStatus(r.dataProssimoAppuntamento ?? null);
-    if (tab !== "TUTTE" && status !== tab) return false;
+    if (tab !== "TUTTE" && stato !== tab) return false;
 
     if (dueDate) {
       const due = r.dataProssimoAppuntamento

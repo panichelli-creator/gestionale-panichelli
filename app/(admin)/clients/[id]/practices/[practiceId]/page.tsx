@@ -520,9 +520,6 @@ export default async function PracticeDetailPage({
       redirect(`/clients/${params.id}`);
     }
 
-    const currentStatus =
-      String((practice as any).apertureStatus ?? "").trim().toUpperCase() || "IN_ATTESA";
-
     const stepIds = formData.getAll("billingStepId").map((v) => String(v ?? "").trim());
     const stepSortOrders = formData.getAll("billingStepSortOrder").map((v) => String(v ?? "").trim());
     const stepLabels = formData.getAll("billingStepLabel").map((v) => String(v ?? "").trim());
@@ -594,15 +591,6 @@ export default async function PracticeDetailPage({
       if (id) incomingUsedIds.add(id);
 
       let nextBillingStatus = billingStatus;
-
-      if (
-        nextBillingStatus === "DA_FATTURARE" &&
-        triggerStatus &&
-        triggerStatus === currentStatus
-      ) {
-        nextBillingStatus = "FATTURA_DA_INVIARE";
-      }
-
       let invoiceDate = invoiceDateInput;
       let paidAt = paidAtInput;
 

@@ -54,6 +54,10 @@ function toNum(v: any) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function eur(v: any) {
+  return toNum(v).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+}
+
 function normalizeEconomicPayload(raw: any): EconomicPayload | null {
   if (!raw || typeof raw !== "object") return null;
 
@@ -96,6 +100,21 @@ function normalizeEconomicPayload(raw: any): EconomicPayload | null {
         notes: row?.notes ? String(row.notes) : null,
       }))
       .filter((row: any) => row.label || row.amountEur || row.paidAt || row.notes),
+  };
+}
+
+function emptyEconomicPayload(): EconomicPayload {
+  return {
+    costoPraticaEur: null,
+    accontoEur: null,
+    accontoDate: null,
+    accontoYear: null,
+    accontoNotes: null,
+    saldoEur: null,
+    saldoDate: null,
+    saldoYear: null,
+    saldoNotes: null,
+    paymentRows: [],
   };
 }
 
@@ -193,6 +212,80 @@ function buildNotesWithEconomic(notes: string | null, economic: EconomicPayload 
   return clean ? `${clean}\n\n${token}` : token;
 }
 
+function buildEconomicFromFormData(formData: FormData): EconomicPayload {
+  const paymentRows: EconomicPayload["paymentRows"] = [];
+
+  for (let i = 0; i < 10; i++) {
+    const label = String(formData.get(`paymentRows.${i}.label`) ?? "").trim();
+    const amountRaw = String(formData.get(`paymentRows.${i}.amountEur`) ?? "").trim();
+    const paidAt = String(formData.get(`paymentRows.${i}.paidAt`) ?? "").trim() || null;
+    const paidYearRaw = String(formData.get(`paymentRows.${i}.paidYear`) ?? "").trim();
+    const notes = String(formData.get(`paymentRows.${i}.notes`) ?? "").trim() || null;
+
+    const amountEur = toNum(amountRaw);
+    const paidYear =
+      paidYearRaw && Number.isFinite(Number(paidYearRaw)) ? Number(paidYearRaw) : null;
+
+    if (label || amountEur > 0 || paidAt || paidYear || notes) {
+      paymentRows.push({
+        label: label || `Pagamento ${i + 1}`,
+        amountEur,
+        paidAt,
+        paidYear,
+        notes,
+      });
+    }
+  }
+
+  return {
+    costoPraticaEur: (() => {
+      const v = String(formData.get("costoPraticaEur") ?? "").trim();
+      return v === "" ? null : toNum(v);
+    })(),
+    accontoEur: (() => {
+      const v = String(formData.get("accontoEur") ?? "").trim();
+      return v === "" ? null : toNum(v);
+    })(),
+    accontoDate: String(formData.get("accontoDate") ?? "").trim() || null,
+    accontoYear: (() => {
+      const v = String(formData.get("accontoYear") ?? "").trim();
+      return v && Number.isFinite(Number(v)) ? Number(v) : null;
+    })(),
+    accontoNotes: String(formData.get("accontoNotes") ?? "").trim() || null,
+    saldoEur: (() => {
+      const v = String(formData.get("saldoEur") ?? "").trim();
+      return v === "" ? null : toNum(v);
+    })(),
+    saldoDate: String(formData.get("saldoDate") ?? "").trim() || null,
+    saldoYear: (() => {
+      const v = String(formData.get("saldoYear") ?? "").trim();
+      return v && Number.isFinite(Number(v)) ? Number(v) : null;
+    })(),
+    saldoNotes: String(formData.get("saldoNotes") ?? "").trim() || null,
+    paymentRows,
+  };
+}
+
+function getEconomicSummary(econ: EconomicPayload | null | undefined) {
+  const e = econ ?? emptyEconomicPayload();
+
+  const costoPraticaEur = toNum(e.costoPraticaEur);
+  const accontoEur = toNum(e.accontoEur);
+  const saldoEur = toNum(e.saldoEur);
+  const altriPagamenti = (e.paymentRows ?? []).reduce((acc, row) => acc + toNum(row.amountEur), 0);
+  const totaleRegistrato = accontoEur + saldoEur + altriPagamenti;
+  const residuo = costoPraticaEur - totaleRegistrato;
+
+  return {
+    costoPraticaEur,
+    accontoEur,
+    saldoEur,
+    altriPagamenti,
+    totaleRegistrato,
+    residuo,
+  };
+}
+
 export default async function EditPracticePage({
   params,
 }: {
@@ -214,7 +307,17 @@ export default async function EditPracticePage({
   const concluso = isConcluso(currentStatus);
 
   const notesParts = splitNotesAndEconomic(p.notes);
-  const econ = notesParts.economic;
+  const econ = notesParts.economic ?? emptyEconomicPayload();
+  const summary = getEconomicSummary(econ);
+  const paymentRows = Array.from({ length: Math.max(5, econ.paymentRows.length || 0) }, (_, i) => {
+    return econ.paymentRows[i] ?? {
+      label: "",
+      amountEur: 0,
+      paidAt: null,
+      paidYear: null,
+      notes: null,
+    };
+  });
 
   async function updatePractice(formData: FormData) {
     "use server";
@@ -233,6 +336,7 @@ export default async function EditPracticePage({
     const startYearRaw = String(formData.get("startYear") ?? "").trim();
     const startYear = startYearRaw ? Number(startYearRaw) : null;
     const notes = String(formData.get("notes") ?? "").trim() || null;
+    const economic = buildEconomicFromFormData(formData);
 
     if (!title) {
       redirect(`/clients/${clientId}/practices/${practiceId}/edit`);
@@ -247,7 +351,7 @@ export default async function EditPracticePage({
         inApertureList,
         apertureStatus,
         startYear,
-        notes: buildNotesWithEconomic(notes, econ),
+        notes: buildNotesWithEconomic(notes, economic),
       },
     });
 
@@ -349,6 +453,217 @@ export default async function EditPracticePage({
             />
             <b>Aggiungi in lista Aperture</b>
           </label>
+        </div>
+
+        <div className="card" style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Parte economica</div>
+
+          <div className="grid2" style={{ marginTop: 12 }}>
+            <div>
+              <label>Costo pratica €</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                name="costoPraticaEur"
+                defaultValue={econ.costoPraticaEur ?? ""}
+              />
+            </div>
+
+            <div>
+              <label>Acconto €</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                name="accontoEur"
+                defaultValue={econ.accontoEur ?? ""}
+              />
+            </div>
+          </div>
+
+          <div className="grid3" style={{ marginTop: 12 }}>
+            <div>
+              <label>Data acconto</label>
+              <input
+                className="input"
+                type="date"
+                name="accontoDate"
+                defaultValue={econ.accontoDate ?? ""}
+              />
+            </div>
+
+            <div>
+              <label>Anno acconto</label>
+              <input
+                className="input"
+                type="number"
+                name="accontoYear"
+                defaultValue={econ.accontoYear ?? ""}
+              />
+            </div>
+
+            <div>
+              <label>Note acconto</label>
+              <input className="input" name="accontoNotes" defaultValue={econ.accontoNotes ?? ""} />
+            </div>
+          </div>
+
+          <div className="grid2" style={{ marginTop: 12 }}>
+            <div>
+              <label>Saldo €</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                name="saldoEur"
+                defaultValue={econ.saldoEur ?? ""}
+              />
+            </div>
+
+            <div>
+              <label>Data saldo</label>
+              <input
+                className="input"
+                type="date"
+                name="saldoDate"
+                defaultValue={econ.saldoDate ?? ""}
+              />
+            </div>
+          </div>
+
+          <div className="grid2" style={{ marginTop: 12 }}>
+            <div>
+              <label>Anno saldo</label>
+              <input
+                className="input"
+                type="number"
+                name="saldoYear"
+                defaultValue={econ.saldoYear ?? ""}
+              />
+            </div>
+
+            <div>
+              <label>Note saldo</label>
+              <input className="input" name="saldoNotes" defaultValue={econ.saldoNotes ?? ""} />
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Pagamenti aggiuntivi</div>
+
+          <div className="tableWrap" style={{ marginTop: 10 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th>Importo €</th>
+                  <th>Data</th>
+                  <th>Anno</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paymentRows.map((row, i) => (
+                  <tr key={i}>
+                    <td>
+                      <input
+                        className="input"
+                        name={`paymentRows.${i}.label`}
+                        defaultValue={row.label ?? ""}
+                        placeholder={`Pagamento ${i + 1}`}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        step="0.01"
+                        name={`paymentRows.${i}.amountEur`}
+                        defaultValue={row.amountEur ? String(row.amountEur) : ""}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        type="date"
+                        name={`paymentRows.${i}.paidAt`}
+                        defaultValue={row.paidAt ?? ""}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        name={`paymentRows.${i}.paidYear`}
+                        defaultValue={row.paidYear ?? ""}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        name={`paymentRows.${i}.notes`}
+                        defaultValue={row.notes ?? ""}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div
+          className="card"
+          style={{
+            marginTop: 12,
+            border: "1px solid rgba(37,99,235,0.25)",
+            background: "rgba(37,99,235,0.06)",
+          }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Riepilogo economico</div>
+
+          <div className="grid3" style={{ marginTop: 10 }}>
+            <div>
+              <div className="muted">Costo pratica</div>
+              <div style={{ fontWeight: 900 }}>{eur(summary.costoPraticaEur)}</div>
+            </div>
+
+            <div>
+              <div className="muted">Acconto</div>
+              <div style={{ fontWeight: 900 }}>{eur(summary.accontoEur)}</div>
+            </div>
+
+            <div>
+              <div className="muted">Saldo</div>
+              <div style={{ fontWeight: 900 }}>{eur(summary.saldoEur)}</div>
+            </div>
+
+            <div>
+              <div className="muted">Pagamenti aggiuntivi</div>
+              <div style={{ fontWeight: 900 }}>{eur(summary.altriPagamenti)}</div>
+            </div>
+
+            <div>
+              <div className="muted">Totale registrato</div>
+              <div style={{ fontWeight: 900, color: "#166534" }}>
+                {eur(summary.totaleRegistrato)}
+              </div>
+            </div>
+
+            <div>
+              <div className="muted">Residuo</div>
+              <div
+                style={{
+                  fontWeight: 900,
+                  color: summary.residuo > 0 ? "#b91c1c" : "#166534",
+                }}
+              >
+                {eur(summary.residuo)}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div style={{ marginTop: 12 }}>

@@ -546,44 +546,46 @@ export default async function MapPage({
   const plannedServiceIds = existingPlanRows.map((p) => p.clientServiceId);
 
   const rows = await prisma.clientService.findMany({
-  where: {
-    site: {
-      isNot: null,
-    },
-    OR: [
-      {
-        dueDate: { lt: to },
-        status: { notIn: ["SVOLTO", "FATTURATO"] as any },
+    where: {
+      site: {
+        isNot: null,
       },
-      ...(plannedServiceIds.length ? [{ id: { in: plannedServiceIds } }] : []),
-    ],
-    ...(service
-      ? {
-          service: {
-            name: service,
+      ...(service
+        ? {
+            service: {
+              name: service,
+            },
+          }
+        : {}),
+      OR: [
+        {
+          dueDate: {
+            gte: from,
+            lt: to,
           },
-        }
-      : {}),
-  },
-  include: {
-    client: {
-      include: {
-        contacts: {
-          select: {
-            name: true,
-            phone: true,
-            role: true,
+        },
+        ...(plannedServiceIds.length ? [{ id: { in: plannedServiceIds } }] : []),
+      ],
+    },
+    include: {
+      client: {
+        include: {
+          contacts: {
+            select: {
+              name: true,
+              phone: true,
+              role: true,
+            },
+            orderBy: [{ role: "asc" }, { name: "asc" }],
           },
-          orderBy: [{ role: "asc" }, { name: "asc" }],
         },
       },
+      service: true,
+      site: true,
     },
-    service: true,
-    site: true,
-  },
-  orderBy: [{ dueDate: "asc" }, { client: { name: "asc" } }],
-  take: 200000,
-});
+    orderBy: [{ dueDate: "asc" }, { client: { name: "asc" } }],
+    take: 200000,
+  });
 
   const planMap = new Map(
     existingPlanRows.map((p) => [
@@ -738,7 +740,7 @@ export default async function MapPage({
         <div className="card" style={{ marginTop: 0 }}>
           <h2 style={{ fontSize: 15, fontWeight: 900, marginBottom: 10 }}>Filtri mese</h2>
 
-          <form>
+          <form method="GET">
             <div style={{ display: "grid", gap: 10 }}>
               <div>
                 <label>Mese</label>
@@ -773,6 +775,10 @@ export default async function MapPage({
 
           <div className="card" style={{ marginTop: 12, padding: 10 }}>
             <div className="muted">
+              Mese selezionato: <b>{ym}</b>
+            </div>
+
+            <div className="muted" style={{ marginTop: 4 }}>
               Risultati con sede mappabile: <b>{orderedMarkers.length}</b>
             </div>
 
@@ -795,8 +801,10 @@ export default async function MapPage({
             </div>
 
             <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-              Automatico: <b>3 appuntamenti al giorno</b> con accorpamento per vicinanza.
-              Sabato e domenica esclusi solo dall’assegnazione automatica.
+              Ora il filtro mese mostra solo:
+              <br />
+              - scadenze del mese selezionato
+              <br />- elementi già pianificati in quel mese
             </div>
           </div>
         </div>
@@ -814,8 +822,8 @@ export default async function MapPage({
                 <th>Servizio</th>
                 <th>Sede</th>
                 <th>Telefono cliente</th>
+                <th>Telefono cliente 2</th>
                 <th>Referente</th>
-                <th>Telefono referente</th>
                 <th>Stato</th>
                 <th>Data agenda</th>
                 <th>Vista</th>
@@ -847,14 +855,14 @@ export default async function MapPage({
                     {m.clientPhone !== "—" ? <a href={`tel:${m.clientPhone}`}>{m.clientPhone}</a> : "—"}
                   </td>
                   <td>
-                    <b>{m.referenteName}</b>
-                  </td>
-                  <td>
                     {m.referentePhone !== "—" ? (
                       <a href={`tel:${m.referentePhone}`}>{m.referentePhone}</a>
                     ) : (
                       "—"
                     )}
+                  </td>
+                  <td>
+                    <b>{m.referenteName}</b>
                   </td>
                   <td>
                     <form action={saveMapPlanItem} className="inlineEditor">

@@ -25,7 +25,6 @@ async function createClient(formData: FormData) {
   const contactPhone = String(formData.get("contactPhone") || "").trim() || null;
   const contactEmail = String(formData.get("contactEmail") || "").trim() || null;
   const contactRole = String(formData.get("contactRole") || "").trim() || "REFERENTE";
-
   const marketingList = String(formData.get("marketingList") || "").trim() || null;
 
   if (!name) {
@@ -38,10 +37,10 @@ async function createClient(formData: FormData) {
   });
 
   if (existing) {
-    redirect(
-      `/clients/new?err=${encodeURIComponent(`Cliente già esistente: "${existing.name}"`)}`
-    );
+    redirect(`/clients/new?err=${encodeURIComponent(`Cliente già esistente: "${existing.name}"`)}`);
   }
+
+  let clientId = "";
 
   try {
     const client = await prisma.client.create({
@@ -58,26 +57,25 @@ async function createClient(formData: FormData) {
                 name: contactName,
                 phone: contactPhone,
                 email: contactEmail,
-                role: contactRole,
+                role: contactRole as any,
                 ...(marketingList ? { marketingList } : {}),
               },
             }
           : undefined,
       },
+      select: { id: true },
     });
 
-    redirect(`/clients/${client.id}`);
+    clientId = client.id;
   } catch (e: any) {
     if (e?.code === "P2002") {
-      redirect(
-        `/clients/new?err=${encodeURIComponent(`Cliente già esistente: "${name}"`)}`
-      );
+      redirect(`/clients/new?err=${encodeURIComponent(`Cliente già esistente: "${name}"`)}`);
     }
 
-    redirect(
-      `/clients/new?err=${encodeURIComponent(e?.message ?? "Errore creazione cliente")}`
-    );
+    redirect(`/clients/new?err=${encodeURIComponent(e?.message ?? "Errore creazione cliente")}`);
   }
+
+  redirect(`/clients/${clientId}`);
 }
 
 export default async function NewClientPage({

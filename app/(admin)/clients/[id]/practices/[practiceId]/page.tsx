@@ -82,10 +82,6 @@ function cleanNotes(raw: string | null | undefined) {
   const text = String(raw ?? "");
   const b64Start = text.indexOf("[[ECON_B64:");
   if (b64Start >= 0) return text.slice(0, b64Start).trim();
-
-  const oldStart = text.indexOf("--- ECONOMICA_JSON ---");
-  if (oldStart >= 0) return text.slice(0, oldStart).trim();
-
   return text.trim();
 }
 
@@ -112,6 +108,30 @@ function getSalSummary(steps: any[]) {
   };
 }
 
+function getAutoPracticeStatus(steps: any[]) {
+  const normalized = steps.map((s) => ({
+    trigger: String(s?.triggerStatus ?? "").toUpperCase(),
+    status: String(s?.billingStatus ?? "").toUpperCase(),
+  }));
+
+  if (normalized.some((s) => s.trigger === "CONCLUSO" && s.status === "INCASSATA"))
+    return "CONCLUSO";
+
+  if (normalized.some((s) => s.trigger === "ISPEZIONE_ASL"))
+    return "ISPEZIONE_ASL";
+
+  if (normalized.some((s) => s.trigger === "ACCETTATO"))
+    return "ACCETTATO";
+
+  if (normalized.some((s) => s.trigger === "INIZIO_LAVORI"))
+    return "INIZIO_LAVORI";
+
+  if (normalized.some((s) => s.trigger === "INVIATA_REGIONE"))
+    return "INVIATA_REGIONE";
+
+  return "IN_ATTESA";
+}
+
 export default async function PracticeDetailPage({
   params,
 }: {
@@ -134,36 +154,15 @@ export default async function PracticeDetailPage({
 
   const practiceAny = p as any;
   const billingSteps = Array.isArray(practiceAny.billingSteps) ? practiceAny.billingSteps : [];
+
   const summary = getSalSummary(billingSteps);
+  const autoStatus = getAutoPracticeStatus(billingSteps);
   const notesText = cleanNotes(p.notes);
 
   async function updateBillingSteps(formData: FormData) {
     "use server";
 
     const { prisma } = await import("@/lib/prisma");
-
-    const practice = await prisma.clientPractice.findUnique({
-      where: { id: params.practiceId },
-      include: {
-        billingSteps: {
-          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        },
-      },
-    });
-
-    if (!practice || practice.clientId !== params.id) {
-      redirect(`/clients/${params.id}`);
-    }
-
-    const apertureStatus =
-      String(formData.get("apertureStatus") ?? "IN_ATTESA").trim().toUpperCase() || "IN_ATTESA";
-
-    await prisma.clientPractice.update({
-      where: { id: params.practiceId },
-      data: {
-        apertureStatus: apertureStatus as any,
-      },
-    });
 
     const stepIds = formData.getAll("billingStepId").map((v) => String(v ?? "").trim());
     const stepSortOrders = formData.getAll("billingStepSortOrder").map((v) => String(v ?? "").trim());
@@ -184,489 +183,121 @@ export default async function PracticeDetailPage({
     const stepPaidAts = formData.getAll("billingStepPaidAt").map((v) => String(v ?? "").trim());
     const stepNotes = formData.getAll("billingStepNotes").map((v) => String(v ?? "").trim());
 
-    const existingStepIds = new Set<string>(
-      ((practice as any).billingSteps ?? []).map((x: any) => String(x.id))
-    );
+    const existing = await prisma.practiceBillingStep.findMany({
+      where: { practiceId: params.practiceId },
+    });
 
-    const incomingUsedIds = new Set<string>();
+    const existingIds = new Set(existing.map((x) => x.id));
+    const incomingUsed = new Set<string>();
 
-    const billingStepRows: Array<{
-      id: string | null;
-      sortOrder: number;
-      label: string;
-      triggerStatus: string | null;
-      amountEur: number;
-      billingStatus: string;
-      invoiceNumber: string | null;
-      invoiceDate: Date | null;
-      paidAt: Date | null;
-      notes: string | null;
-    }> = [];
+    const rows: any[] = [];
 
     for (let i = 0; i < stepLabels.length; i++) {
       const id = stepIds[i] || "";
       const label = stepLabels[i] || "";
-      const triggerStatus = stepTriggers[i] || null;
-      const amountEurStep = toNum(stepAmounts[i]);
-      const billingStatus = String(stepStatuses[i] || "").trim().toUpperCase() || "-";
-      const invoiceNumber = stepInvoiceNumbers[i] || null;
-      const invoiceDateInput = stepInvoiceDates[i] ? new Date(`${stepInvoiceDates[i]}T12:00:00`) : null;
-      const paidAtInput = stepPaidAts[i] ? new Date(`${stepPaidAts[i]}T12:00:00`) : null;
-      const note = stepNotes[i] || null;
-      const sortOrderRaw = stepSortOrders[i];
-      const sortOrder =
-        sortOrderRaw && Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : i + 1;
+      const trigger = stepTriggers[i] || null;
+      const amount = toNum(stepAmounts[i]);
+      const status = stepStatuses[i] || "-";
 
-      const isBlank =
-        !label &&
-        !amountEurStep &&
-        !triggerStatus &&
-        !invoiceNumber &&
-        !invoiceDateInput &&
-        !paidAtInput &&
-        !note &&
-        (billingStatus === "-" || billingStatus === "");
+      if (!label && !amount && !trigger) continue;
 
-      if (isBlank) continue;
+      if (id) incomingUsed.add(id);
 
-      if (id) incomingUsedIds.add(id);
-
-      let invoiceDate = invoiceDateInput;
-      let paidAt = paidAtInput;
-
-      if (billingStatus === "FATTURATA" && !invoiceDate) {
-        invoiceDate = new Date();
-      }
-
-      if (billingStatus === "INCASSATA") {
-        if (!invoiceDate) invoiceDate = new Date();
-        if (!paidAt) paidAt = new Date();
-      }
-
-      if (billingStatus === "-") {
-        invoiceDate = null;
-        paidAt = null;
-      }
-
-      billingStepRows.push({
+      rows.push({
         id: id || null,
-        sortOrder,
+        sortOrder: Number(stepSortOrders[i] || i + 1),
         label: label || `Voce ${i + 1}`,
-        triggerStatus,
-        amountEur: amountEurStep,
-        billingStatus,
-        invoiceNumber,
-        invoiceDate,
-        paidAt,
-        notes: note,
+        triggerStatus: trigger,
+        amountEur: amount,
+        billingStatus: status,
+        invoiceNumber: stepInvoiceNumbers[i] || null,
+        invoiceDate: stepInvoiceDates[i] ? new Date(stepInvoiceDates[i]) : null,
+        paidAt: stepPaidAts[i] ? new Date(stepPaidAts[i]) : null,
+        notes: stepNotes[i] || null,
       });
     }
 
-    const deleteIds = Array.from(existingStepIds).filter((id) => !incomingUsedIds.has(id));
+    const deleteIds = Array.from(existingIds).filter((id) => !incomingUsed.has(id));
 
     if (deleteIds.length) {
       await prisma.practiceBillingStep.deleteMany({
-        where: {
-          id: { in: deleteIds },
-          practiceId: params.practiceId,
-        },
+        where: { id: { in: deleteIds } },
       });
     }
 
-    for (const step of billingStepRows) {
-      if (step.id) {
+    for (const r of rows) {
+      if (r.id) {
         await prisma.practiceBillingStep.update({
-          where: { id: step.id },
-          data: {
-            sortOrder: step.sortOrder,
-            label: step.label,
-            triggerStatus: step.triggerStatus,
-            amountEur: step.amountEur,
-            billingStatus: step.billingStatus,
-            invoiceNumber: step.invoiceNumber,
-            invoiceDate: step.invoiceDate,
-            paidAt: step.paidAt,
-            notes: step.notes,
-          },
+          where: { id: r.id },
+          data: r,
         });
       } else {
         await prisma.practiceBillingStep.create({
-          data: {
-            practiceId: params.practiceId,
-            sortOrder: step.sortOrder,
-            label: step.label,
-            billingType: "ALTRO",
-            triggerStatus: step.triggerStatus,
-            amountEur: step.amountEur,
-            billingStatus: step.billingStatus,
-            invoiceNumber: step.invoiceNumber,
-            invoiceDate: step.invoiceDate,
-            paidAt: step.paidAt,
-            notes: step.notes,
-          },
+          data: { ...r, practiceId: params.practiceId, billingType: "ALTRO" },
         });
       }
     }
 
-    revalidatePath(`/clients/${params.id}`);
     revalidatePath(`/clients/${params.id}/practices/${params.practiceId}`);
     redirect(`/clients/${params.id}/practices/${params.practiceId}`);
   }
 
   return (
     <div className="card">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-        <h1>Pratica</h1>
+      <h1>{p.title}</h1>
 
-        <div className="row" style={{ gap: 8 }}>
-          <Link className="btn" href={`/clients/${params.id}`}>
-            ← Torna al cliente
-          </Link>
+      <div className="card">
+        <div>Cliente: {p.client.name}</div>
+        <div>Data: {fmt(p.practiceDate)}</div>
 
-          <Link className="btn" href={`/clients/${params.id}/practices/${params.practiceId}/edit`}>
-            Modifica dati pratica
-          </Link>
+        <div>
+          Stato:
+          <span style={practiceStatusBadgeStyle(autoStatus)}>
+            {practiceStatusLabel(autoStatus)}
+          </span>
+        </div>
 
-          <Link className="btn" href={`/clients/${params.id}/practices/${params.practiceId}/delete`}>
-            Elimina
-          </Link>
+        <div>
+          Totale: <b>{fmtEur(summary.costoPratica)}</b>
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
-        Cliente: <b>{p.client.name}</b>
-      </div>
+      <form action={updateBillingSteps} className="card">
+        <table className="table">
+          <tbody>
+            {Array.from({ length: 4 }).map((_, i) => {
+              const s = billingSteps[i];
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="grid2">
-          <div>
-            <div className="muted">Pratica</div>
-            <div>
-              <b>{p.title}</b>
-            </div>
-          </div>
+              return (
+                <tr key={i}>
+                  <td>
+                    <input name="billingStepId" defaultValue={s?.id ?? ""} />
+                  </td>
 
-          <div>
-            <div className="muted">Data</div>
-            <div>{fmt(p.practiceDate)}</div>
-          </div>
-        </div>
+                  <td>
+                    <input name="billingStepLabel" defaultValue={s?.label ?? ""} />
+                  </td>
 
-        <div className="grid2" style={{ marginTop: 12 }}>
-          <div>
-            <div className="muted">Numero determina</div>
-            <div>{p.determinaNumber ?? "—"}</div>
-          </div>
+                  <td>
+                    <input name="billingStepAmountEur" defaultValue={s?.amountEur ?? ""} />
+                  </td>
 
-          <div>
-            <div className="muted">Lista Aperture</div>
-            <div>{practiceAny.inApertureList ? "SI" : "NO"}</div>
-          </div>
-        </div>
+                  <td>
+                    <select name="billingStepStatus" defaultValue={s?.billingStatus ?? "-"}>
+                      <option value="-">-</option>
+                      <option value="DA_FATTURARE">Da fatturare</option>
+                      <option value="FATTURATA">Fatturata</option>
+                      <option value="INCASSATA">Incassata</option>
+                    </select>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
 
-        <div className="grid2" style={{ marginTop: 12 }}>
-          <div>
-            <div className="muted">Stato pratica</div>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "4px 10px",
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 800,
-                ...practiceStatusBadgeStyle(practiceAny.apertureStatus),
-              }}
-            >
-              {practiceStatusLabel(practiceAny.apertureStatus)}
-            </span>
-          </div>
-
-          <div>
-            <div className="muted">Anno inizio</div>
-            <div>{fmtYear(practiceAny.startYear)}</div>
-          </div>
-        </div>
-
-        <div className="grid2" style={{ marginTop: 12 }}>
-          <div>
-            <div className="muted">Importo pratica da SAL</div>
-            <div>
-              <b>{summary.costoPratica > 0 ? fmtEur(summary.costoPratica) : "—"}</b>
-            </div>
-          </div>
-
-          <div>
-            <div className="muted">Ultimo aggiornamento</div>
-            <div>{fmt(p.updatedAt)}</div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <div className="muted">Note</div>
-          <div>{notesText || "—"}</div>
-        </div>
-      </div>
-
-      <form action={updateBillingSteps} className="card" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0 }}>Piano fatturazione / SAL</h2>
-
-          <button className="btn primary" type="submit">
-            Salva SAL
-          </button>
-        </div>
-
-        <div className="card" style={{ marginTop: 12, padding: 12 }}>
-          <label>Stato pratica</label>
-          <select
-            className="input"
-            name="apertureStatus"
-            defaultValue={practiceAny.apertureStatus ?? "IN_ATTESA"}
-            style={{ maxWidth: 320 }}
-          >
-            <option value="IN_ATTESA">In attesa</option>
-            <option value="INVIATA_REGIONE">Inviata Regione</option>
-            <option value="INIZIO_LAVORI">Inizio lavori</option>
-            <option value="ACCETTATO">Accettato</option>
-            <option value="ISPEZIONE_ASL">Ispezione ASL</option>
-            <option value="CONCLUSO">Concluso</option>
-          </select>
-        </div>
-
-        <div style={{ overflowX: "auto", marginTop: 10 }}>
-          <table className="table sal-edit-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Voce</th>
-                <th>Trigger stato</th>
-                <th>Importo</th>
-                <th>Stato fattura</th>
-                <th>N. fattura</th>
-                <th>Data fattura</th>
-                <th>Incasso</th>
-                <th>Note</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {Array.from({ length: Math.max(billingSteps.length, 4) }).map((_, i) => {
-                const current = billingSteps[i];
-
-                return (
-                  <tr key={current?.id ?? `new-${i}`}>
-                    <td>
-                      {current?.sortOrder ?? i + 1}
-                      <input type="hidden" name="billingStepId" value={current?.id ?? ""} />
-                      <input
-                        type="hidden"
-                        name="billingStepSortOrder"
-                        value={String(current?.sortOrder ?? i + 1)}
-                      />
-                    </td>
-
-                    <td>
-                      <select
-                        className="input sal-input"
-                        name="billingStepLabel"
-                        defaultValue={current?.label ?? ""}
-                      >
-                        <option value="">—</option>
-                        <option value="Accettazione">Accettazione</option>
-                        <option value="Primo acconto">Primo acconto</option>
-                        <option value="Secondo acconto">Secondo acconto</option>
-                        <option value="Saldo">Saldo</option>
-                      </select>
-                    </td>
-
-                    <td>
-                      <select
-                        className="input sal-input"
-                        name="billingStepTriggerStatus"
-                        defaultValue={current?.triggerStatus ?? ""}
-                      >
-                        <option value="">Nessuno</option>
-                        <option value="IN_ATTESA">In attesa</option>
-                        <option value="INVIATA_REGIONE">Inviata Regione</option>
-                        <option value="INIZIO_LAVORI">Inizio lavori</option>
-                        <option value="ACCETTATO">Accettato</option>
-                        <option value="ISPEZIONE_ASL">Ispezione ASL</option>
-                        <option value="CONCLUSO">Concluso</option>
-                      </select>
-                    </td>
-
-                    <td>
-                      <input
-                        className="input sal-input"
-                        name="billingStepAmountEur"
-                        defaultValue={fmtMoneyInput(current?.amountEur)}
-                        placeholder="500"
-                      />
-                    </td>
-
-                    <td>
-                      <select
-                        className="input sal-input"
-                        name="billingStepStatus"
-                        defaultValue={current?.billingStatus ?? "-"}
-                      >
-                        <option value="-">-</option>
-                        <option value="DA_FATTURARE">Da fatturare</option>
-                        <option value="FATTURA_DA_INVIARE">Fattura da inviare</option>
-                        <option value="FATTURATA">Fatturata</option>
-                        <option value="INCASSATA">Incassata</option>
-                      </select>
-                    </td>
-
-                    <td>
-                      <input
-                        className="input sal-input"
-                        name="billingStepInvoiceNumber"
-                        defaultValue={current?.invoiceNumber ?? ""}
-                        placeholder="45/2026"
-                      />
-                    </td>
-
-                    <td>
-                      <input
-                        className="input sal-input"
-                        type="date"
-                        name="billingStepInvoiceDate"
-                        defaultValue={fmtIso(current?.invoiceDate ?? null)}
-                      />
-                    </td>
-
-                    <td>
-                      <input
-                        className="input sal-input"
-                        type="date"
-                        name="billingStepPaidAt"
-                        defaultValue={fmtIso(current?.paidAt ?? null)}
-                      />
-                    </td>
-
-                    <td>
-                      <input
-                        className="input sal-input"
-                        name="billingStepNotes"
-                        defaultValue={current?.notes ?? ""}
-                        placeholder="Facoltative"
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="row" style={{ marginTop: 14, gap: 8 }}>
-          <button className="btn primary" type="submit">
-            Salva SAL
-          </button>
-        </div>
+        <button className="btn primary">Salva</button>
       </form>
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <h2 style={{ marginBottom: 10 }}>Riepilogo economico SAL</h2>
-
-        <div className="grid4">
-          <div>
-            <div className="muted">Costo pratica</div>
-            <div>
-              <b>{summary.costoPratica > 0 ? fmtEur(summary.costoPratica) : "—"}</b>
-            </div>
-          </div>
-
-          <div>
-            <div className="muted">Totale fatturato</div>
-            <div>
-              <b>{summary.totaleFatturato > 0 ? fmtEur(summary.totaleFatturato) : "—"}</b>
-            </div>
-          </div>
-
-          <div>
-            <div className="muted">Totale incassato</div>
-            <div>
-              <b>{summary.totaleIncassato > 0 ? fmtEur(summary.totaleIncassato) : "—"}</b>
-            </div>
-          </div>
-
-          <div>
-            <div className="muted">Residuo</div>
-            <div>
-              <b>{summary.costoPratica > 0 ? fmtEur(summary.residuo) : "—"}</b>
-            </div>
-          </div>
-        </div>
-
-        <div className="muted" style={{ marginTop: 10 }}>
-          Il riepilogo economico ora considera solo le righe del Piano fatturazione / SAL.
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <h2 style={{ marginBottom: 10 }}>Stato SAL</h2>
-
-        {billingSteps.length ? (
-          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-            {billingSteps.map((step: any) => (
-              <span
-                key={step.id}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "5px 9px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 800,
-                  ...billingStatusBadgeStyle(step.billingStatus),
-                }}
-              >
-                {step.label}: {billingStatusLabel(step.billingStatus)} · {fmtEur(step.amountEur)}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <div className="muted">Nessuna voce SAL.</div>
-        )}
-      </div>
-
-      <style>{`
-        .sal-edit-table {
-          min-width: 1200px;
-        }
-
-        .sal-edit-table td,
-        .sal-edit-table th {
-          vertical-align: top;
-        }
-
-        .sal-input {
-          min-width: 140px;
-          width: 100%;
-        }
-
-        .grid4 {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 12px;
-        }
-
-        @media (max-width: 1000px) {
-          .grid4 {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-        }
-
-        @media (max-width: 700px) {
-          .grid4 {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
     </div>
   );
 }

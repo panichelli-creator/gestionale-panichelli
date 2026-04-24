@@ -40,6 +40,7 @@ model Client {
   practices              ClientPractice[]
   services               ClientService[]
   sites                  ClientSite[]
+  safetyRoles            ClientSafetyRole[]
   clinicalChecks         ClinicalEngineeringCheck[]
   mapPlans               MapPlanItem[]
   people                 Person[]
@@ -48,17 +49,17 @@ model Client {
 }
 
 model ClientContact {
-  id            String                     @id @default(cuid())
+  id            String                       @id @default(cuid())
   clientId      String
-  role          String                     @default("ALTRO")
+  role          String                       @default("ALTRO")
   name          String
   email         String?
   phone         String?
   notes         String?
-  createdAt     DateTime                   @default(now())
-  updatedAt     DateTime                   @updatedAt
-  marketingList String?                    @default("ALTRO")
-  client        Client                     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
+  marketingList String?                      @default("ALTRO")
+  client        Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   marketingMaps ClientContactMarketingList[]
 
   @@index([clientId])
@@ -67,13 +68,13 @@ model ClientContact {
 }
 
 model MarketingList {
-  id          String                     @id @default(cuid())
-  name        String                     @unique
-  slug        String                     @unique
-  isSystem    Boolean                    @default(false)
-  isActive    Boolean                    @default(true)
-  createdAt   DateTime                   @default(now())
-  updatedAt   DateTime                   @updatedAt
+  id          String                       @id @default(cuid())
+  name        String                       @unique
+  slug        String                       @unique
+  isSystem    Boolean                      @default(false)
+  isActive    Boolean                      @default(true)
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
   contactMaps ClientContactMarketingList[]
 
   @@index([name])
@@ -82,16 +83,40 @@ model MarketingList {
 }
 
 model ClientContactMarketingList {
-  id             String        @id @default(cuid())
+  id              String        @id @default(cuid())
   clientContactId String
   marketingListId String
-  createdAt      DateTime      @default(now())
-  clientContact  ClientContact @relation(fields: [clientContactId], references: [id], onDelete: Cascade)
-  marketingList  MarketingList @relation(fields: [marketingListId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+  clientContact   ClientContact @relation(fields: [clientContactId], references: [id], onDelete: Cascade)
+  marketingList   MarketingList @relation(fields: [marketingListId], references: [id], onDelete: Cascade)
 
   @@unique([clientContactId, marketingListId])
   @@index([clientContactId])
   @@index([marketingListId])
+}
+
+model ClientSafetyRole {
+  id          String    @id @default(cuid())
+  clientId    String
+  personId    String?
+  role        String
+  name        String
+  email       String?
+  phone       String?
+  appointedAt DateTime?
+  dueDate     DateTime?
+  alertMonths Int       @default(2)
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  client Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  person Person? @relation(fields: [personId], references: [id])
+
+  @@index([clientId])
+  @@index([personId])
+  @@index([role])
+  @@index([dueDate])
 }
 
 model ClientSite {
@@ -117,11 +142,11 @@ model ClientSite {
 }
 
 model ServiceCatalog {
-  id             String       @id @default(cuid())
-  name           String       @unique
-  isActive       Boolean      @default(true)
+  id             String          @id @default(cuid())
+  name           String          @unique
+  isActive       Boolean         @default(true)
   clientServices ClientService[]
-  workReports    WorkReport[] @relation("WorkReportService")
+  workReports    WorkReport[]    @relation("WorkReportService")
 }
 
 model ClientService {
@@ -197,22 +222,23 @@ model ClinicalEngineeringCheck {
 }
 
 model Person {
-  id               String           @id @default(cuid())
-  fiscalCode       String?          @unique
+  id               String             @id @default(cuid())
+  fiscalCode       String?            @unique
   lastName         String
   firstName        String
   email            String?
   phone            String?
   role             String?
   hireDate         DateTime?
-  medicalCheckDone Boolean          @default(false)
+  medicalCheckDone Boolean            @default(false)
   clientId         String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  client           Client?          @relation(fields: [clientId], references: [id])
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  client           Client?            @relation(fields: [clientId], references: [id])
   personClients    PersonClient[]
   personSites      PersonSite[]
   trainings        TrainingRecord[]
+  safetyRoles      ClientSafetyRole[]
 
   @@index([lastName, firstName])
 }

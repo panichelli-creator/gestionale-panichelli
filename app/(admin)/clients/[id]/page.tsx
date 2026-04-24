@@ -53,6 +53,33 @@ function vseBadge(next: Date | null) {
   return { label: "In regola", cls: "badge ok" };
 }
 
+function safetyRoleLabel(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+
+  if (s === "DDL") return "DDL";
+  if (s === "RSPP") return "RSPP";
+  if (s === "RLS") return "RLS";
+  if (s === "PREPOSTO") return "Preposto";
+  if (s === "ANTINCENDIO") return "Addetto antincendio";
+  if (s === "PRIMO_SOCCORSO") return "Addetto primo soccorso";
+  if (s === "DIRIGENTE") return "Dirigente";
+  if (s === "BLSD") return "Addetto BLSD";
+
+  return s || "—";
+}
+
+function safetyDueBadge(d: Date | null | undefined) {
+  if (!d) return { label: "Nessuna scadenza", cls: "badge muted" };
+
+  const today = startOfDay(new Date());
+  const due = startOfDay(new Date(d));
+  const in90 = startOfDay(addDays(today, 90));
+
+  if (due < today) return { label: "Scaduto", cls: "badge danger" };
+  if (due <= in90) return { label: "In scadenza", cls: "badge warn" };
+  return { label: "In regola", cls: "badge ok" };
+}
+
 function getReferenteLabel(serviceRow: any) {
   const referente = String(serviceRow?.referenteName ?? "").trim();
   return referente || "—";
@@ -259,6 +286,10 @@ export default async function ClientDetailPage({
     include: {
       contacts: true,
       sites: true,
+      safetyRoles: {
+        include: { person: true },
+        orderBy: [{ role: "asc" }, { name: "asc" }],
+      },
       services: {
         include: { service: true, site: true },
         orderBy: { dueDate: "asc" },
@@ -339,36 +370,45 @@ export default async function ClientDetailPage({
       const at = a?.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
       const bt = b?.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
       if (at !== bt) return at - bt;
+
       const al = String(a?.__person?.lastName ?? "").localeCompare(
         String(b?.__person?.lastName ?? ""),
         "it"
       );
       if (al !== 0) return al;
+
       return String(a?.course?.name ?? "").localeCompare(String(b?.course?.name ?? ""), "it");
     });
 
   const today = startOfDay(new Date());
+
   const trainingScaduti = trainingRows.filter(
     (t: any) => t?.dueDate && startOfDay(new Date(t.dueDate)) < today
   ).length;
+
   const trainingFatturati = trainingRows.filter((t: any) => Boolean(t?.fatturata)).length;
+
   const trainingTotalValue = trainingRows.reduce(
     (acc: number, t: any) => acc + toNum(t?.priceEur),
     0
   );
+
   const trainingBilledValue = trainingRows
     .filter((t: any) => Boolean(t?.fatturata))
     .reduce((acc: number, t: any) => acc + toNum(t?.priceEur), 0);
 
   const apertureCount = client.practices.filter((p: any) => Boolean(p.inApertureList)).length;
+
   const practicesInAttesa = client.practices.filter(
     (p: any) => String(p.apertureStatus ?? "IN_ATTESA").trim().toUpperCase() === "IN_ATTESA"
   ).length;
+
   const practicesInCorso = client.practices.filter((p: any) =>
     ["INVIATA_REGIONE", "INIZIO_LAVORI", "ACCETTATO", "ISPEZIONE_ASL"].includes(
       String(p.apertureStatus ?? "").trim().toUpperCase()
     )
   ).length;
+
   const practicesConcluse = client.practices.filter(
     (p: any) => String(p.apertureStatus ?? "").trim().toUpperCase() === "CONCLUSO"
   ).length;
@@ -377,10 +417,12 @@ export default async function ClientDetailPage({
     (acc: number, p: any) => acc + getBillingSummary(p).valore,
     0
   );
+
   const totalBillingFatturato = client.practices.reduce(
     (acc: number, p: any) => acc + getBillingSummary(p).fatturato,
     0
   );
+
   const totalBillingIncassato = client.practices.reduce(
     (acc: number, p: any) => acc + getBillingSummary(p).incassato,
     0
@@ -629,6 +671,67 @@ export default async function ClientDetailPage({
 
       <div className="card" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
+          <h2>Organigramma sicurezza</h2>
+
+          {!isIngegnereClinico ? (
+            <Link className="btn primary" href={`/clients/${client.id}/organigramma`}>
+              Gestisci organigramma
+            </Link>
+          ) : (
+            <div className="muted">Sola consultazione</div>
+          )}
+        </div>
+
+        <div className="muted" style={{ marginTop: 6 }}>
+          DDL, RSPP, RLS, Preposto, Dirigente, Antincendio, Primo soccorso, BLSD
+        </div>
+
+        {client.safetyRoles.length ? (
+          <table className="table" style={{ marginTop: 10 }}>
+            <thead>
+              <tr>
+                <th>Ruolo</th>
+                <th>Nome</th>
+                <th>Telefono</th>
+                <th>Email</th>
+                <th>Scadenza</th>
+                <th>Stato</th>
+              </tr>
+            </thead>
+            <tbody>
+              {client.safetyRoles.map((r: any) => {
+                const badge = safetyDueBadge(r.dueDate);
+
+                return (
+                  <tr key={r.id}>
+                    <td>
+                      <b>{safetyRoleLabel(r.role)}</b>
+                    </td>
+                   <td>
+  {r.person
+    ? `${r.person.lastName ?? ""} ${r.person.firstName ?? ""}`.trim()
+    : r.name ?? "—"}
+</td>
+                    <td>{r.phone ?? r.person?.phone ?? "—"}</td>
+                    <td>{r.email ?? r.person?.email ?? "—"}</td>
+                    <td>{fmt(r.dueDate)}</td>
+                    <td>
+                      <span className={badge.cls}>{badge.label}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="muted" style={{ marginTop: 10 }}>
+            Nessun ruolo inserito.
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Servizi (mantenimenti)</h2>
 
           {!isIngegnereClinico ? (
@@ -667,15 +770,10 @@ export default async function ClientDetailPage({
                   <td>
                     <b>{s.service?.name}</b>
                   </td>
-
                   <td>{s.site?.name ?? "—"}</td>
-
                   <td>{getReferenteLabel(s)}</td>
-
                   <td>{fmt(s.dueDate)}</td>
-
                   <td>{s.periodicity}</td>
-
                   <td>{s.priceEur ? eur(toNum(s.priceEur)) : "—"}</td>
                 </tr>
               ))}
@@ -882,13 +980,10 @@ export default async function ClientDetailPage({
                 return (
                   <tr key={r.id}>
                     <td>{fmt(r.dataProssimoAppuntamento)}</td>
-
                     <td>
                       <span className={badge.cls}>{badge.label}</span>
                     </td>
-
                     <td>{eur(toNum(r.costoServizio))}</td>
-
                     <td>
                       <Link
                         className="btn"
@@ -918,10 +1013,10 @@ export default async function ClientDetailPage({
               <Link className="btn" href={`/clients/${client.id}/practices/new`}>
                 Nuova pratica
               </Link>
-              <Link className="btn" href={`/aperture`}>
+              <Link className="btn" href="/aperture">
                 Vai ad Aperture
               </Link>
-              <Link className="btn primary" href={`/pratiche-fatturazione`}>
+              <Link className="btn primary" href="/pratiche-fatturazione">
                 Fatturazione pratiche
               </Link>
             </div>

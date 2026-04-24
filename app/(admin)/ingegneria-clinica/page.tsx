@@ -10,6 +10,8 @@ type SP = {
   q?: string;
   tab?: string;
   dueDate?: string;
+  dueDateFrom?: string;
+  dueDateTo?: string;
   eseguite?: string;
   fatturate?: string;
   clientId?: string;
@@ -63,7 +65,8 @@ function getStatus(d: Date | string | null | undefined) {
 function hrefWith(params: {
   q?: string;
   tab?: string;
-  dueDate?: string;
+  dueDateFrom?: string;
+  dueDateTo?: string;
   eseguite?: string;
   fatturate?: string;
   clientId?: string;
@@ -72,7 +75,8 @@ function hrefWith(params: {
 
   if (params.q) qs.set("q", params.q);
   if (params.tab) qs.set("tab", params.tab);
-  if (params.dueDate) qs.set("dueDate", params.dueDate);
+  if (params.dueDateFrom) qs.set("dueDateFrom", params.dueDateFrom);
+  if (params.dueDateTo) qs.set("dueDateTo", params.dueDateTo);
   if (params.eseguite) qs.set("eseguite", params.eseguite);
   if (params.fatturate) qs.set("fatturate", params.fatturate);
   if (params.clientId) qs.set("clientId", params.clientId);
@@ -118,7 +122,11 @@ export default async function ClinicalEngineeringPage({
 
   const q = normalizeText(searchParams?.q ?? "");
   const tab = String(searchParams?.tab ?? "TUTTE").trim().toUpperCase();
-  const dueDate = String(searchParams?.dueDate ?? "").trim();
+
+  const oldDueDate = String(searchParams?.dueDate ?? "").trim();
+  const dueDateFrom = String(searchParams?.dueDateFrom ?? oldDueDate).trim();
+  const dueDateTo = String(searchParams?.dueDateTo ?? "").trim();
+
   const eseguite = String(searchParams?.eseguite ?? "").trim().toUpperCase();
   const fatturate = String(searchParams?.fatturate ?? "").trim().toUpperCase();
   const clientId = String(searchParams?.clientId ?? "").trim();
@@ -204,12 +212,22 @@ export default async function ClinicalEngineeringPage({
 
     if (tab !== "TUTTE" && stato !== tab) return false;
 
-    if (dueDate) {
+    if (dueDateFrom || dueDateTo) {
       const due = r.dataProssimoAppuntamento
         ? startOfDay(new Date(r.dataProssimoAppuntamento))
         : null;
-      const target = startOfDay(new Date(`${dueDate}T00:00:00`));
-      if (!due || due.getTime() !== target.getTime()) return false;
+
+      if (!due) return false;
+
+      if (dueDateFrom) {
+        const from = startOfDay(new Date(`${dueDateFrom}T00:00:00`));
+        if (due < from) return false;
+      }
+
+      if (dueDateTo) {
+        const to = startOfDay(new Date(`${dueDateTo}T00:00:00`));
+        if (due > to) return false;
+      }
     }
 
     if (eseguite === "SI" && !r.verificheEseguite) return false;
@@ -309,7 +327,7 @@ export default async function ClinicalEngineeringPage({
           </h1>
 
           <div className="muted" style={{ marginTop: 6 }}>
-            Totale verifiche: <b>{checks.length}</b>
+            Totale verifiche: <b>{checks.length}</b> · Filtrate: <b>{filtered.length}</b>
           </div>
 
           <div className="muted" style={{ marginTop: 4 }}>
@@ -370,7 +388,8 @@ export default async function ClinicalEngineeringPage({
           href={hrefWith({
             q,
             tab: "TUTTE",
-            dueDate,
+            dueDateFrom,
+            dueDateTo,
             eseguite,
             fatturate,
             clientId: effectiveClientId,
@@ -386,7 +405,8 @@ export default async function ClinicalEngineeringPage({
           href={hrefWith({
             q,
             tab: "SCADUTE",
-            dueDate,
+            dueDateFrom,
+            dueDateTo,
             eseguite,
             fatturate,
             clientId: effectiveClientId,
@@ -409,7 +429,8 @@ export default async function ClinicalEngineeringPage({
           href={hrefWith({
             q,
             tab: "PROSSIMI30",
-            dueDate,
+            dueDateFrom,
+            dueDateTo,
             eseguite,
             fatturate,
             clientId: effectiveClientId,
@@ -432,7 +453,8 @@ export default async function ClinicalEngineeringPage({
           href={hrefWith({
             q,
             tab: "IN_REGOLA",
-            dueDate,
+            dueDateFrom,
+            dueDateTo,
             eseguite,
             fatturate,
             clientId: effectiveClientId,
@@ -523,7 +545,8 @@ export default async function ClinicalEngineeringPage({
         checks={filtered as any}
         q={q}
         tab={tab}
-        dueDate={dueDate}
+        dueDateFrom={dueDateFrom}
+        dueDateTo={dueDateTo}
         eseguite={eseguite}
         fatturate={fatturate}
         clientId={effectiveClientId}

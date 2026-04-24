@@ -201,8 +201,13 @@ function getSiteName(r: CheckRow) {
 }
 
 function compareChecks(a: CheckRow, b: CheckRow) {
-  const ad = a.dataProssimoAppuntamento ? new Date(a.dataProssimoAppuntamento).getTime() : Number.MAX_SAFE_INTEGER;
-  const bd = b.dataProssimoAppuntamento ? new Date(b.dataProssimoAppuntamento).getTime() : Number.MAX_SAFE_INTEGER;
+  const ad = a.dataProssimoAppuntamento
+    ? new Date(a.dataProssimoAppuntamento).getTime()
+    : Number.MAX_SAFE_INTEGER;
+  const bd = b.dataProssimoAppuntamento
+    ? new Date(b.dataProssimoAppuntamento).getTime()
+    : Number.MAX_SAFE_INTEGER;
+
   if (ad !== bd) return ad - bd;
 
   const ac = getClientName(a).localeCompare(getClientName(b), "it", { sensitivity: "base" });
@@ -222,11 +227,7 @@ function buildFrozenAppointmentMap(items: CheckRow[]) {
   return map;
 }
 
-function getFrozenBucket(
-  id: string,
-  frozenAppointmentMap: Record<string, boolean>,
-  row: CheckRow
-) {
+function getFrozenBucket(id: string, frozenAppointmentMap: Record<string, boolean>, row: CheckRow) {
   if (Object.prototype.hasOwnProperty.call(frozenAppointmentMap, id)) {
     return frozenAppointmentMap[id] ? "presi" : "daFare";
   }
@@ -237,7 +238,8 @@ export default function ChecksTableClient({
   checks = [],
   q,
   tab,
-  dueDate,
+  dueDateFrom,
+  dueDateTo,
   eseguite,
   fatturate,
   clientId = "",
@@ -245,7 +247,8 @@ export default function ChecksTableClient({
   checks?: CheckRow[];
   q: string;
   tab: string;
-  dueDate: string;
+  dueDateFrom: string;
+  dueDateTo: string;
   eseguite: string;
   fatturate: string;
   clientId?: string;
@@ -280,13 +283,13 @@ export default function ChecksTableClient({
     setRole(getRoleFromSessionCookie());
   }, []);
 
- useEffect(() => {
-  const timers = saveTimersRef.current;
+  useEffect(() => {
+    const timers = saveTimersRef.current;
 
-  return () => {
-    Object.values(timers).forEach((timerId) => window.clearTimeout(timerId));
-  };
-}, []);
+    return () => {
+      Object.values(timers).forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, []);
 
   function setRowSaveState(id: string, state: SaveState) {
     setSaveStates((curr) => ({ ...curr, [id]: state }));
@@ -478,7 +481,8 @@ export default function ChecksTableClient({
   function qs(next: {
     q?: string;
     tab?: string;
-    dueDate?: string;
+    dueDateFrom?: string;
+    dueDateTo?: string;
     eseguite?: string;
     fatturate?: string;
     clientId?: string;
@@ -486,7 +490,8 @@ export default function ChecksTableClient({
     const p = new URLSearchParams();
     if (next.q) p.set("q", next.q);
     if (next.tab) p.set("tab", next.tab);
-    if (next.dueDate) p.set("dueDate", next.dueDate);
+    if (next.dueDateFrom) p.set("dueDateFrom", next.dueDateFrom);
+    if (next.dueDateTo) p.set("dueDateTo", next.dueDateTo);
     if (next.eseguite) p.set("eseguite", next.eseguite);
     if (next.fatturate) p.set("fatturate", next.fatturate);
     if (next.clientId) p.set("clientId", next.clientId);
@@ -721,7 +726,21 @@ export default function ChecksTableClient({
             placeholder="Cerca per nome cliente o sede..."
           />
 
-          <input className="input filterInput" type="date" name="dueDate" defaultValue={dueDate} />
+          <input
+            className="input filterInput"
+            type="date"
+            name="dueDateFrom"
+            defaultValue={dueDateFrom}
+            title="Scadenza da"
+          />
+
+          <input
+            className="input filterInput"
+            type="date"
+            name="dueDateTo"
+            defaultValue={dueDateTo}
+            title="Scadenza a"
+          />
 
           <select className="input filterInput" name="eseguite" defaultValue={eseguite || ""}>
             <option value="">Fatto: tutti</option>
@@ -753,25 +772,49 @@ export default function ChecksTableClient({
           <div className="filterTabs">
             <Link
               className={`btn btnFilter ${tab === "TUTTE" ? "primary" : ""}`}
-              href={qs({ q, tab: "TUTTE", dueDate, eseguite, fatturate, clientId })}
+              href={qs({ q, tab: "TUTTE", dueDateFrom, dueDateTo, eseguite, fatturate, clientId })}
             >
               Tutte
             </Link>
             <Link
               className={`btn btnFilter ${tab === "SCADUTE" ? "primary" : ""}`}
-              href={qs({ q, tab: "SCADUTE", dueDate, eseguite, fatturate, clientId })}
+              href={qs({
+                q,
+                tab: "SCADUTE",
+                dueDateFrom,
+                dueDateTo,
+                eseguite,
+                fatturate,
+                clientId,
+              })}
             >
               Scadute
             </Link>
             <Link
               className={`btn btnFilter ${tab === "PROSSIMI30" ? "primary" : ""}`}
-              href={qs({ q, tab: "PROSSIMI30", dueDate, eseguite, fatturate, clientId })}
+              href={qs({
+                q,
+                tab: "PROSSIMI30",
+                dueDateFrom,
+                dueDateTo,
+                eseguite,
+                fatturate,
+                clientId,
+              })}
             >
               Prossimi 30gg
             </Link>
             <Link
               className={`btn btnFilter ${tab === "IN_REGOLA" ? "primary" : ""}`}
-              href={qs({ q, tab: "IN_REGOLA", dueDate, eseguite, fatturate, clientId })}
+              href={qs({
+                q,
+                tab: "IN_REGOLA",
+                dueDateFrom,
+                dueDateTo,
+                eseguite,
+                fatturate,
+                clientId,
+              })}
             >
               In regola
             </Link>
@@ -789,8 +832,8 @@ export default function ChecksTableClient({
           }}
         >
           <div className="muted" style={{ fontSize: 12 }}>
-            Ordine congelato nella sessione. Le righe si riordinano solo con il pulsante sotto o al
-            refresh della pagina.
+            Filtro scadenze: se compili solo “da”, mostra da quella data in poi. Se compili “da” e
+            “a”, mostra solo il periodo richiesto.
           </div>
 
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -1016,9 +1059,15 @@ export default function ChecksTableClient({
                   <div className="muted">Indirizzo sede</div>
                   <div>
                     {selected.indirizzoSedeSnapshot ??
-                      ([selected.site?.address, selected.site?.city, selected.site?.province, selected.site?.cap]
+                      ([
+                        selected.site?.address,
+                        selected.site?.city,
+                        selected.site?.province,
+                        selected.site?.cap,
+                      ]
                         .filter(Boolean)
-                        .join(", ") || "—")}
+                        .join(", ") ||
+                        "—")}
                   </div>
                 </div>
 
@@ -1035,7 +1084,7 @@ export default function ChecksTableClient({
       <style>{`
         .searchGrid{
           display:grid;
-          grid-template-columns: minmax(200px, 1.45fr) 130px 145px 145px auto;
+          grid-template-columns: minmax(200px, 1.45fr) 130px 130px 145px 145px auto;
           gap:8px;
           align-items:center;
         }

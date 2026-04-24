@@ -36,6 +36,7 @@ function fmtMoneyInput(v: any) {
 
 function practiceStatusLabel(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
+
   if (s === "INVIATA_REGIONE") return "Inviata Regione";
   if (s === "INIZIO_LAVORI") return "Inizio lavori";
   if (s === "ACCETTATO") return "Accettato";
@@ -58,6 +59,7 @@ function practiceStatusBadgeStyle(v: string | null | undefined) {
 
 function billingStatusLabel(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
+
   if (s === "DA_FATTURARE") return "Da fatturare";
   if (s === "FATTURA_DA_INVIARE") return "Fattura da inviare";
   if (s === "FATTURATA") return "Fatturata";
@@ -108,15 +110,6 @@ function getSalSummary(steps: any[]) {
   };
 }
 
-function getAutoPracticeStatus(steps: any[]) {
-  const active = steps
-    .filter((s) => String(s?.triggerStatus ?? "").trim())
-    .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0));
-
-  const last = active[active.length - 1];
-  return String(last?.triggerStatus ?? "IN_ATTESA").trim().toUpperCase();
-}
-
 export default async function PracticeDetailPage({
   params,
 }: {
@@ -140,8 +133,8 @@ export default async function PracticeDetailPage({
   const practiceAny = p as any;
   const billingSteps = Array.isArray(practiceAny.billingSteps) ? practiceAny.billingSteps : [];
   const summary = getSalSummary(billingSteps);
-  const autoStatus = getAutoPracticeStatus(billingSteps);
   const notesText = cleanNotes(p.notes);
+  const currentPracticeStatus = String(practiceAny.apertureStatus ?? "IN_ATTESA").trim().toUpperCase();
 
   async function updateBillingSteps(formData: FormData) {
     "use server";
@@ -156,6 +149,9 @@ export default async function PracticeDetailPage({
     if (!practice || practice.clientId !== params.id) {
       redirect(`/clients/${params.id}`);
     }
+
+    const apertureStatus =
+      String(formData.get("apertureStatus") ?? "IN_ATTESA").trim().toUpperCase() || "IN_ATTESA";
 
     const stepIds = formData.getAll("billingStepId").map((v) => String(v ?? "").trim());
     const stepSortOrders = formData.getAll("billingStepSortOrder").map((v) => String(v ?? "").trim());
@@ -278,17 +274,10 @@ export default async function PracticeDetailPage({
       }
     }
 
-    const freshSteps = await prisma.practiceBillingStep.findMany({
-      where: { practiceId: params.practiceId },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-    });
-
-    const nextAutoStatus = getAutoPracticeStatus(freshSteps);
-
     await prisma.clientPractice.update({
       where: { id: params.practiceId },
       data: {
-        apertureStatus: nextAutoStatus as any,
+        apertureStatus: apertureStatus as any,
       },
     });
 
@@ -350,7 +339,7 @@ export default async function PracticeDetailPage({
 
         <div className="grid2" style={{ marginTop: 12 }}>
           <div>
-            <div className="muted">Stato pratica automatico da SAL</div>
+            <div className="muted">Stato pratica manuale</div>
             <span
               style={{
                 display: "inline-flex",
@@ -359,10 +348,10 @@ export default async function PracticeDetailPage({
                 borderRadius: 999,
                 fontSize: 12,
                 fontWeight: 800,
-                ...practiceStatusBadgeStyle(autoStatus),
+                ...practiceStatusBadgeStyle(currentPracticeStatus),
               }}
             >
-              {practiceStatusLabel(autoStatus)}
+              {practiceStatusLabel(currentPracticeStatus)}
             </span>
           </div>
 
@@ -401,6 +390,23 @@ export default async function PracticeDetailPage({
           </button>
         </div>
 
+        <div className="card" style={{ marginTop: 12, padding: 12 }}>
+          <label>Stato pratica</label>
+          <select
+            className="input"
+            name="apertureStatus"
+            defaultValue={currentPracticeStatus}
+            style={{ maxWidth: 320 }}
+          >
+            <option value="IN_ATTESA">In attesa</option>
+            <option value="INVIATA_REGIONE">Inviata Regione</option>
+            <option value="INIZIO_LAVORI">Inizio lavori</option>
+            <option value="ACCETTATO">Accettato</option>
+            <option value="ISPEZIONE_ASL">Ispezione ASL</option>
+            <option value="CONCLUSO">Concluso</option>
+          </select>
+        </div>
+
         <div style={{ overflowX: "auto", marginTop: 10 }}>
           <table className="table sal-edit-table">
             <thead>
@@ -434,7 +440,11 @@ export default async function PracticeDetailPage({
                     </td>
 
                     <td>
-                      <select className="input sal-input" name="billingStepLabel" defaultValue={current?.label ?? ""}>
+                      <select
+                        className="input sal-input"
+                        name="billingStepLabel"
+                        defaultValue={current?.label ?? ""}
+                      >
                         <option value="">—</option>
                         <option value="Accettazione">Accettazione</option>
                         <option value="Primo acconto">Primo acconto</option>
@@ -444,7 +454,11 @@ export default async function PracticeDetailPage({
                     </td>
 
                     <td>
-                      <select className="input sal-input" name="billingStepTriggerStatus" defaultValue={current?.triggerStatus ?? ""}>
+                      <select
+                        className="input sal-input"
+                        name="billingStepTriggerStatus"
+                        defaultValue={current?.triggerStatus ?? ""}
+                      >
                         <option value="">Nessuno</option>
                         <option value="IN_ATTESA">In attesa</option>
                         <option value="INVIATA_REGIONE">Inviata Regione</option>
@@ -456,11 +470,20 @@ export default async function PracticeDetailPage({
                     </td>
 
                     <td>
-                      <input className="input sal-input" name="billingStepAmountEur" defaultValue={fmtMoneyInput(current?.amountEur)} placeholder="500" />
+                      <input
+                        className="input sal-input"
+                        name="billingStepAmountEur"
+                        defaultValue={fmtMoneyInput(current?.amountEur)}
+                        placeholder="500"
+                      />
                     </td>
 
                     <td>
-                      <select className="input sal-input" name="billingStepStatus" defaultValue={current?.billingStatus ?? "-"}>
+                      <select
+                        className="input sal-input"
+                        name="billingStepStatus"
+                        defaultValue={current?.billingStatus ?? "-"}
+                      >
                         <option value="-">-</option>
                         <option value="DA_FATTURARE">Da fatturare</option>
                         <option value="FATTURA_DA_INVIARE">Fattura da inviare</option>
@@ -470,19 +493,39 @@ export default async function PracticeDetailPage({
                     </td>
 
                     <td>
-                      <input className="input sal-input" name="billingStepInvoiceNumber" defaultValue={current?.invoiceNumber ?? ""} placeholder="45/2026" />
+                      <input
+                        className="input sal-input"
+                        name="billingStepInvoiceNumber"
+                        defaultValue={current?.invoiceNumber ?? ""}
+                        placeholder="45/2026"
+                      />
                     </td>
 
                     <td>
-                      <input className="input sal-input" type="date" name="billingStepInvoiceDate" defaultValue={fmtIso(current?.invoiceDate ?? null)} />
+                      <input
+                        className="input sal-input"
+                        type="date"
+                        name="billingStepInvoiceDate"
+                        defaultValue={fmtIso(current?.invoiceDate ?? null)}
+                      />
                     </td>
 
                     <td>
-                      <input className="input sal-input" type="date" name="billingStepPaidAt" defaultValue={fmtIso(current?.paidAt ?? null)} />
+                      <input
+                        className="input sal-input"
+                        type="date"
+                        name="billingStepPaidAt"
+                        defaultValue={fmtIso(current?.paidAt ?? null)}
+                      />
                     </td>
 
                     <td>
-                      <input className="input sal-input" name="billingStepNotes" defaultValue={current?.notes ?? ""} placeholder="Facoltative" />
+                      <input
+                        className="input sal-input"
+                        name="billingStepNotes"
+                        defaultValue={current?.notes ?? ""}
+                        placeholder="Facoltative"
+                      />
                     </td>
                   </tr>
                 );
@@ -504,22 +547,30 @@ export default async function PracticeDetailPage({
         <div className="grid4">
           <div>
             <div className="muted">Costo pratica</div>
-            <div><b>{summary.costoPratica > 0 ? fmtEur(summary.costoPratica) : "—"}</b></div>
+            <div>
+              <b>{summary.costoPratica > 0 ? fmtEur(summary.costoPratica) : "—"}</b>
+            </div>
           </div>
 
           <div>
             <div className="muted">Totale fatturato</div>
-            <div><b>{summary.totaleFatturato > 0 ? fmtEur(summary.totaleFatturato) : "—"}</b></div>
+            <div>
+              <b>{summary.totaleFatturato > 0 ? fmtEur(summary.totaleFatturato) : "—"}</b>
+            </div>
           </div>
 
           <div>
             <div className="muted">Totale incassato</div>
-            <div><b>{summary.totaleIncassato > 0 ? fmtEur(summary.totaleIncassato) : "—"}</b></div>
+            <div>
+              <b>{summary.totaleIncassato > 0 ? fmtEur(summary.totaleIncassato) : "—"}</b>
+            </div>
           </div>
 
           <div>
             <div className="muted">Residuo</div>
-            <div><b>{summary.costoPratica > 0 ? fmtEur(summary.residuo) : "—"}</b></div>
+            <div>
+              <b>{summary.costoPratica > 0 ? fmtEur(summary.residuo) : "—"}</b>
+            </div>
           </div>
         </div>
       </div>

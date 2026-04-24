@@ -1,15 +1,9 @@
-
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-const ECON_START = "--- ECONOMICA_JSON ---";
-const ECON_END = "--- FINE ECONOMICA_JSON ---";
-const ECON_B64_PREFIX = "[[ECON_B64:";
-const ECON_B64_SUFFIX = "]]";
 
 function fmt(d: Date | null | undefined) {
   return d ? new Date(d).toLocaleDateString("it-IT") : "—";
@@ -98,6 +92,7 @@ function getPracticeStatusLabel(v: string | null | undefined) {
   if (s === "ACCETTATO") return "Accettato";
   if (s === "ISPEZIONE_ASL") return "Ispezione ASL";
   if (s === "CONCLUSO") return "Concluso";
+
   return "In attesa";
 }
 
@@ -157,118 +152,6 @@ function getStartYear(p: any) {
   return String(raw);
 }
 
-function fatturazioneBadge(v: any) {
-  if (v === true) return { label: "Fatturata", cls: "badge ok" };
-  return { label: "Da fatturare", cls: "badge warn" };
-}
-
-function normalizeEconomicPayload(raw: any) {
-  if (!raw || typeof raw !== "object") return null;
-
-  return {
-    costoPraticaEur:
-      raw.costoPraticaEur == null || raw.costoPraticaEur === "" ? null : toNum(raw.costoPraticaEur),
-    accontoEur: raw.accontoEur == null || raw.accontoEur === "" ? null : toNum(raw.accontoEur),
-    accontoDate: raw.accontoDate ? String(raw.accontoDate) : null,
-    accontoYear:
-      raw.accontoYear == null || raw.accontoYear === ""
-        ? null
-        : Number.isFinite(Number(raw.accontoYear))
-          ? Number(raw.accontoYear)
-          : null,
-    accontoNotes: raw.accontoNotes ? String(raw.accontoNotes) : null,
-    saldoEur: raw.saldoEur == null || raw.saldoEur === "" ? null : toNum(raw.saldoEur),
-    saldoDate: raw.saldoDate ? String(raw.saldoDate) : null,
-    saldoYear:
-      raw.saldoYear == null || raw.saldoYear === ""
-        ? null
-        : Number.isFinite(Number(raw.saldoYear))
-          ? Number(raw.saldoYear)
-          : null,
-    saldoNotes: raw.saldoNotes ? String(raw.saldoNotes) : null,
-    paymentRows: Array.isArray(raw.paymentRows) ? raw.paymentRows : [],
-  };
-}
-
-function splitNotesAndEconomic(rawNotes: string | null | undefined) {
-  const text = String(rawNotes ?? "");
-
-  const b64Start = text.indexOf(ECON_B64_PREFIX);
-  const b64End = b64Start >= 0 ? text.indexOf(ECON_B64_SUFFIX, b64Start) : -1;
-
-  if (b64Start !== -1 && b64End !== -1 && b64End > b64Start) {
-    const cleanNotes = text.slice(0, b64Start).trim();
-    const encoded = text.slice(b64Start + ECON_B64_PREFIX.length, b64End).trim();
-
-    try {
-      const decoded = Buffer.from(encoded, "base64").toString("utf8");
-      const parsed = JSON.parse(decoded);
-      return {
-        cleanNotes,
-        economic: normalizeEconomicPayload(parsed),
-      };
-    } catch {
-      return {
-        cleanNotes: text.trim(),
-        economic: null as any,
-      };
-    }
-  }
-
-  const start = text.indexOf(ECON_START);
-  const end = text.indexOf(ECON_END);
-
-  if (start === -1 || end === -1 || end <= start) {
-    return {
-      cleanNotes: text.trim(),
-      economic: null as any,
-    };
-  }
-
-  const cleanNotes = text.slice(0, start).trim();
-  const jsonText = text.slice(start + ECON_START.length, end).trim();
-
-  try {
-    const parsed = JSON.parse(jsonText);
-    return {
-      cleanNotes,
-      economic: normalizeEconomicPayload(parsed),
-    };
-  } catch {
-    return {
-      cleanNotes: text.trim(),
-      economic: null as any,
-    };
-  }
-}
-
-function getPracticeAmount(p: any) {
-  const notesParts = splitNotesAndEconomic(p?.notes);
-  const econ = notesParts.economic;
-
-  const candidates = [
-    p?.amountEur,
-    econ?.costoPraticaEur,
-    p?.costoPraticaEur,
-    p?.practiceAmountEur,
-    p?.totalAmountEur,
-    p?.priceEur,
-    p?.totalEur,
-    p?.clientPriceEur,
-    p?.valueEur,
-    p?.price,
-    p?.total,
-    p?.amount,
-  ];
-
-  for (const v of candidates) {
-    const n = toNum(v);
-    if (n !== 0) return n;
-  }
-
-  return 0;
-}
-
 function billingStatusLabel(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
 
@@ -307,6 +190,14 @@ function billingStatusStyle(v: string | null | undefined) {
     };
   }
 
+  if (s === "DA_FATTURARE") {
+    return {
+      background: "rgba(239,68,68,0.10)",
+      color: "#b91c1c",
+      border: "1px solid rgba(239,68,68,0.30)",
+    };
+  }
+
   return {
     background: "rgba(0,0,0,0.04)",
     color: "rgba(0,0,0,0.72)",
@@ -316,6 +207,8 @@ function billingStatusStyle(v: string | null | undefined) {
 
 function getBillingSummary(p: any) {
   const steps = Array.isArray(p?.billingSteps) ? p.billingSteps : [];
+
+  const valore = steps.reduce((acc: number, row: any) => acc + toNum(row?.amountEur), 0);
 
   const fatturato = steps
     .filter((row: any) =>
@@ -342,8 +235,10 @@ function getBillingSummary(p: any) {
     null;
 
   return {
+    valore,
     fatturato,
     incassato,
+    residuo: Math.max(valore - incassato, 0),
     count: steps.length,
     activeTriggerStatus: activeStep?.triggerStatusUpper || "",
     activeBillingStatus: activeStep?.billingStatusUpper || "—",
@@ -422,14 +317,9 @@ export default async function ClientDetailPage({
 
   const personMap = new Map<string, any>();
 
-  for (const p of client.people) {
-    personMap.set(p.id, p);
-  }
-
+  for (const p of client.people) personMap.set(p.id, p);
   for (const pc of client.personClients) {
-    if (pc.person) {
-      personMap.set(pc.person.id, pc.person);
-    }
+    if (pc.person) personMap.set(pc.person.id, pc.person);
   }
 
   const peopleRows = Array.from(personMap.values()).sort((a, b) => {
@@ -449,15 +339,23 @@ export default async function ClientDetailPage({
       const at = a?.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
       const bt = b?.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
       if (at !== bt) return at - bt;
-      const al = String(a?.__person?.lastName ?? "").localeCompare(String(b?.__person?.lastName ?? ""), "it");
+      const al = String(a?.__person?.lastName ?? "").localeCompare(
+        String(b?.__person?.lastName ?? ""),
+        "it"
+      );
       if (al !== 0) return al;
       return String(a?.course?.name ?? "").localeCompare(String(b?.course?.name ?? ""), "it");
     });
 
   const today = startOfDay(new Date());
-  const trainingScaduti = trainingRows.filter((t: any) => t?.dueDate && startOfDay(new Date(t.dueDate)) < today).length;
+  const trainingScaduti = trainingRows.filter(
+    (t: any) => t?.dueDate && startOfDay(new Date(t.dueDate)) < today
+  ).length;
   const trainingFatturati = trainingRows.filter((t: any) => Boolean(t?.fatturata)).length;
-  const trainingTotalValue = trainingRows.reduce((acc: number, t: any) => acc + toNum(t?.priceEur), 0);
+  const trainingTotalValue = trainingRows.reduce(
+    (acc: number, t: any) => acc + toNum(t?.priceEur),
+    0
+  );
   const trainingBilledValue = trainingRows
     .filter((t: any) => Boolean(t?.fatturata))
     .reduce((acc: number, t: any) => acc + toNum(t?.priceEur), 0);
@@ -474,8 +372,9 @@ export default async function ClientDetailPage({
   const practicesConcluse = client.practices.filter(
     (p: any) => String(p.apertureStatus ?? "").trim().toUpperCase() === "CONCLUSO"
   ).length;
+
   const totalPracticesValue = client.practices.reduce(
-    (acc: number, p: any) => acc + getPracticeAmount(p),
+    (acc: number, p: any) => acc + getBillingSummary(p).valore,
     0
   );
   const totalBillingFatturato = client.practices.reduce(
@@ -920,7 +819,10 @@ export default async function ClientDetailPage({
                   <td>{t.fatturata ? "SI" : "NO"}</td>
                   <td>{fmt(t.fatturataAt ?? null)}</td>
                   <td>
-                    <Link className="btn" href={`/people/${t.__person.id}/training/${t.id}/edit?clientId=${client.id}&returnTo=${returnToParam}`}>
+                    <Link
+                      className="btn"
+                      href={`/people/${t.__person.id}/training/${t.id}/edit?clientId=${client.id}&returnTo=${returnToParam}`}
+                    >
                       Apri
                     </Link>
                   </td>
@@ -1042,7 +944,7 @@ export default async function ClientDetailPage({
             Concluse: <b>{practicesConcluse}</b>
           </div>
           <div className="card">
-            Valore totale: <b>{eur(totalPracticesValue)}</b>
+            Valore SAL: <b>{eur(totalPracticesValue)}</b>
           </div>
           <div className="card">
             Fatturato SAL: <b>{eur(totalBillingFatturato)}</b>
@@ -1061,16 +963,15 @@ export default async function ClientDetailPage({
                 <th>Anno</th>
                 <th>Stato</th>
                 <th>In Aperture</th>
-                <th>Importo</th>
+                <th>Valore SAL</th>
                 <th>Incassato</th>
+                <th>Residuo</th>
                 <th>Stato SAL</th>
                 <th>Apri</th>
               </tr>
             </thead>
             <tbody>
               {client.practices.map((p: any) => {
-                const fatt = fatturazioneBadge(p.fatturata);
-                const practiceAmount = getPracticeAmount(p);
                 const billing = getBillingSummary(p);
 
                 return (
@@ -1096,10 +997,18 @@ export default async function ClientDetailPage({
                       </span>
                     </td>
                     <td>{p.inApertureList ? "SI" : "NO"}</td>
-                    <td>{practiceAmount > 0 ? eur(practiceAmount) : "—"}</td>
+                    <td>{billing.valore > 0 ? eur(billing.valore) : "—"}</td>
                     <td>{billing.incassato > 0 ? eur(billing.incassato) : "—"}</td>
+                    <td>{billing.valore > 0 ? eur(billing.residuo) : "—"}</td>
                     <td>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                          alignItems: "flex-start",
+                        }}
+                      >
                         {billing.activeTriggerStatus ? (
                           <span
                             style={{
@@ -1131,7 +1040,7 @@ export default async function ClientDetailPage({
                             {billingStatusLabel(billing.activeBillingStatus)}
                           </span>
                         ) : (
-                          <span className={fatt.cls}>{fatt.label}</span>
+                          <span className="badge muted">—</span>
                         )}
                       </div>
                     </td>

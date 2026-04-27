@@ -69,15 +69,30 @@ function safetyRoleLabel(v: string | null | undefined) {
 }
 
 function safetyDueBadge(d: Date | null | undefined) {
-  if (!d) return { label: "Nessuna scadenza", cls: "badge muted" };
+  if (!d) return { label: "Senza scadenza", cls: "badge muted" };
 
   const today = startOfDay(new Date());
   const due = startOfDay(new Date(d));
-  const in90 = startOfDay(addDays(today, 90));
+  const in30 = startOfDay(addDays(today, 30));
 
   if (due < today) return { label: "Scaduto", cls: "badge danger" };
-  if (due <= in90) return { label: "In scadenza", cls: "badge warn" };
+  if (due <= in30) return { label: "Promemoria", cls: "badge warn" };
   return { label: "In regola", cls: "badge ok" };
+}
+
+function safetyRoleOrder(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+
+  if (s === "DDL") return 1;
+  if (s === "DIRIGENTE") return 2;
+  if (s === "PREPOSTO") return 3;
+  if (s === "RSPP") return 4;
+  if (s === "RLS") return 5;
+  if (s === "BLSD") return 6;
+  if (s === "PRIMO_SOCCORSO") return 7;
+  if (s === "ANTINCENDIO") return 8;
+
+  return 999;
 }
 
 function getReferenteLabel(serviceRow: any) {
@@ -423,6 +438,12 @@ export default async function ClientDetailPage({
     0
   );
 
+const safetyRolesOrdered = [...client.safetyRoles].sort((a: any, b: any) => {
+  const byRole = safetyRoleOrder(a.role) - safetyRoleOrder(b.role);
+  if (byRole !== 0) return byRole;
+  return String(a.name ?? "").localeCompare(String(b.name ?? ""), "it");
+});
+
   const totalBillingIncassato = client.practices.reduce(
     (acc: number, p: any) => acc + getBillingSummary(p).incassato,
     0
@@ -669,66 +690,64 @@ export default async function ClientDetailPage({
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Organigramma sicurezza</h2>
+  <div className="card" style={{ marginTop: 12 }}>
+  <div className="row" style={{ justifyContent: "space-between" }}>
+    <h2>Organigramma sicurezza</h2>
 
-          {!isIngegnereClinico ? (
-            <Link className="btn primary" href={`/clients/${client.id}/organigramma`}>
-              Gestisci organigramma
-            </Link>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
-        </div>
+    {!isIngegnereClinico ? (
+      <Link className="btn primary" href={`/clients/${client.id}/organigramma`}>
+        Gestisci organigramma
+      </Link>
+    ) : (
+      <div className="muted">Sola consultazione</div>
+    )}
+  </div>
 
-        <div className="muted" style={{ marginTop: 6 }}>
-          DDL, RSPP, RLS, Preposto, Dirigente, Antincendio, Primo soccorso, BLSD
-        </div>
+  <div className="muted" style={{ marginTop: 6 }}>
+    DDL, Dirigente, Preposto, RSPP, RLS, BLSD, Addetto primo soccorso, Addetto antincendio.
+  </div>
 
-        {client.safetyRoles.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
-            <thead>
-              <tr>
-                <th>Ruolo</th>
-                <th>Nome</th>
-                <th>Telefono</th>
-                <th>Email</th>
-                <th>Scadenza</th>
-                <th>Stato</th>
-              </tr>
-            </thead>
-            <tbody>
-              {client.safetyRoles.map((r: any) => {
-                const badge = safetyDueBadge(r.dueDate);
+  {safetyRolesOrdered.length ? (
+    <table className="table" style={{ marginTop: 10 }}>
+      <thead>
+        <tr>
+          <th>Ruolo</th>
+          <th>Nome e cognome</th>
+          <th>Data nomina</th>
+          <th>Scadenza</th>
+          <th>Stato</th>
+        </tr>
+      </thead>
 
-                return (
-                  <tr key={r.id}>
-                    <td>
-                      <b>{safetyRoleLabel(r.role)}</b>
-                    </td>
-                   <td>
-  {r.person
-    ? `${r.person.lastName ?? ""} ${r.person.firstName ?? ""}`.trim()
-    : r.name ?? "—"}
-</td>
-                    <td>{r.phone ?? r.person?.phone ?? "—"}</td>
-                    <td>{r.email ?? r.person?.email ?? "—"}</td>
-                    <td>{fmt(r.dueDate)}</td>
-                    <td>
-                      <span className={badge.cls}>{badge.label}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessun ruolo inserito.
-          </div>
-        )}
-      </div>
+      <tbody>
+        {safetyRolesOrdered.map((r: any) => {
+          const badge = safetyDueBadge(r.dueDate);
+          const fullName = r.person
+            ? `${r.person.lastName ?? ""} ${r.person.firstName ?? ""}`.trim()
+            : String(r.name ?? "").trim();
+
+          return (
+            <tr key={r.id}>
+              <td>
+                <b>{safetyRoleLabel(r.role)}</b>
+              </td>
+              <td>{fullName || "—"}</td>
+              <td>{fmt(r.appointedAt)}</td>
+              <td>{fmt(r.dueDate)}</td>
+              <td>
+                <span className={badge.cls}>{badge.label}</span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  ) : (
+    <div className="muted" style={{ marginTop: 10 }}>
+      Nessuna nomina inserita.
+    </div>
+  )}
+</div>
 
       <div className="card" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>

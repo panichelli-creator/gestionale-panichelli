@@ -6,30 +6,69 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const ROLES = [
-  { value: "DDL", label: "DDL" },
-  { value: "RSPP", label: "RSPP" },
-  { value: "RLS", label: "RLS" },
-  { value: "PREPOSTO", label: "Preposto" },
-  { value: "ANTINCENDIO", label: "Addetto antincendio" },
-  { value: "PRIMO_SOCCORSO", label: "Addetto primo soccorso" },
-  { value: "DIRIGENTE", label: "Dirigente" },
-  { value: "BLSD", label: "Addetto BLSD" },
+  { value: "DDL", label: "DDL", order: 1 },
+  { value: "DIRIGENTE", label: "Dirigente", order: 2 },
+  { value: "PREPOSTO", label: "Preposto", order: 3 },
+  { value: "RSPP", label: "RSPP", order: 4 },
+  { value: "RLS", label: "RLS", order: 5 },
+  { value: "BLSD", label: "Addetto BLSD", order: 6 },
+  { value: "PRIMO_SOCCORSO", label: "Addetto primo soccorso", order: 7 },
+  { value: "ANTINCENDIO", label: "Addetto antincendio", order: 8 },
 ];
+
+const PERIODS = [
+  { value: "", label: "Nessuna / manuale", years: 0 },
+  { value: "ANNUALE", label: "Annuale", years: 1 },
+  { value: "BIENNALE", label: "Biennale", years: 2 },
+  { value: "TRIENNALE", label: "Triennale", years: 3 },
+  { value: "QUINQUENNALE", label: "Quinquennale", years: 5 },
+];
+
+function fmt(d: Date | null | undefined) {
+  return d ? new Date(d).toLocaleDateString("it-IT") : "—";
+}
 
 function fmtIso(d: Date | null | undefined) {
   return d ? new Date(d).toISOString().slice(0, 10) : "";
 }
 
 function roleLabel(v: string | null | undefined) {
-  const found = ROLES.find((r) => r.value === String(v ?? "").toUpperCase());
-  return found?.label ?? v ?? "—";
+  const s = String(v ?? "").trim().toUpperCase();
+  return ROLES.find((r) => r.value === s)?.label ?? s ?? "—";
+}
+
+function roleOrder(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+  return ROLES.find((r) => r.value === s)?.order ?? 999;
 }
 
 function addYears(dateRaw: string, years: number) {
-  if (!dateRaw) return "";
+  if (!dateRaw || !years) return "";
   const d = new Date(`${dateRaw}T12:00:00`);
   d.setFullYear(d.getFullYear() + years);
   return d.toISOString().slice(0, 10);
+}
+
+function yearsFromPeriod(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+  return PERIODS.find((p) => p.value === s)?.years ?? 0;
+}
+
+function startOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function safetyDueBadge(d: Date | null | undefined) {
+  if (!d) return { label: "Senza scadenza", cls: "badge muted" };
+
+  const today = startOfDay(new Date());
+  const due = startOfDay(new Date(d));
+  const in30 = new Date(today);
+  in30.setDate(in30.getDate() + 30);
+
+  if (due < today) return { label: "Scaduto", cls: "badge danger" };
+  if (due <= in30) return { label: "Promemoria", cls: "badge warn" };
+  return { label: "In regola", cls: "badge ok" };
 }
 
 export default async function ClientOrganigrammaPage({
@@ -44,20 +83,23 @@ export default async function ClientOrganigrammaPage({
     include: {
       safetyRoles: {
         include: { person: true },
-        orderBy: [{ role: "asc" }, { name: "asc" }],
       },
       people: {
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       },
       personClients: {
-        include: {
-          person: true,
-        },
+        include: { person: true },
       },
     },
   });
 
   if (!client) return notFound();
+
+  const safetyRoles = [...client.safetyRoles].sort((a: any, b: any) => {
+    const ro = roleOrder(a.role) - roleOrder(b.role);
+    if (ro !== 0) return ro;
+    return String(a.name ?? "").localeCompare(String(b.name ?? ""), "it");
+  });
 
   const peopleMap = new Map<string, any>();
 
@@ -83,12 +125,9 @@ export default async function ClientOrganigrammaPage({
     const personIdRaw = String(formData.get("personId") ?? "").trim();
     const personId = personIdRaw || null;
     const manualName = String(formData.get("name") ?? "").trim();
-    const email = String(formData.get("email") ?? "").trim() || null;
-    const phone = String(formData.get("phone") ?? "").trim() || null;
     const appointedAtRaw = String(formData.get("appointedAt") ?? "").trim();
-    const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
-    const alertMonthsRaw = String(formData.get("alertMonths") ?? "").trim();
-    const notes = String(formData.get("notes") ?? "").trim() || null;
+    const period = String(formData.get("period") ?? "").trim().toUpperCase();
+    const dueDateManual = String(formData.get("dueDate") ?? "").trim();
 
     let finalName = manualName;
 
@@ -106,20 +145,21 @@ export default async function ClientOrganigrammaPage({
       redirect(`/clients/${clientId}/organigramma`);
     }
 
+    const years = yearsFromPeriod(period);
+    const dueDateCalculated = appointedAtRaw && years ? addYears(appointedAtRaw, years) : "";
+    const finalDueDate = dueDateCalculated || dueDateManual;
+
     const data = {
       clientId,
       personId,
       role,
       name: finalName,
-      email,
-      phone,
+      email: null,
+      phone: null,
       appointedAt: appointedAtRaw ? new Date(`${appointedAtRaw}T12:00:00`) : null,
-      dueDate: dueDateRaw ? new Date(`${dueDateRaw}T12:00:00`) : null,
-      alertMonths:
-        alertMonthsRaw && Number.isFinite(Number(alertMonthsRaw))
-          ? Number(alertMonthsRaw)
-          : 2,
-      notes,
+      dueDate: finalDueDate ? new Date(`${finalDueDate}T12:00:00`) : null,
+      alertMonths: 1,
+      notes: period || null,
     };
 
     if (roleId) {
@@ -212,18 +252,6 @@ export default async function ClientOrganigrammaPage({
           </div>
         </div>
 
-        <div className="grid2" style={{ marginTop: 12 }}>
-          <div>
-            <label>Email</label>
-            <input className="input" name="email" />
-          </div>
-
-          <div>
-            <label>Telefono</label>
-            <input className="input" name="phone" />
-          </div>
-        </div>
-
         <div className="grid3" style={{ marginTop: 12 }}>
           <div>
             <label>Data nomina</label>
@@ -231,19 +259,25 @@ export default async function ClientOrganigrammaPage({
           </div>
 
           <div>
-            <label>Scadenza</label>
-            <input className="input" type="date" name="dueDate" />
+            <label>Periodicità</label>
+            <select className="input" name="period" defaultValue="">
+              {PERIODS.map((p) => (
+                <option key={p.value || "NONE"} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
-            <label>Promemoria mesi prima</label>
-            <input className="input" type="number" name="alertMonths" defaultValue={2} />
+            <label>Scadenza manuale</label>
+            <input className="input" type="date" name="dueDate" />
           </div>
         </div>
 
-        <div style={{ marginTop: 12 }}>
-          <label>Note</label>
-          <textarea className="input" name="notes" rows={3} />
+        <div className="muted" style={{ marginTop: 8 }}>
+          Se scegli una periodicità e inserisci la data nomina, la scadenza viene calcolata in automatico.
+          Promemoria impostato a 1 mese prima.
         </div>
 
         <div className="row" style={{ gap: 8, marginTop: 14 }}>
@@ -256,36 +290,32 @@ export default async function ClientOrganigrammaPage({
       <div className="card" style={{ marginTop: 12 }}>
         <h2>Ruoli inseriti</h2>
 
-        {client.safetyRoles.length ? (
+        {safetyRoles.length ? (
           <div className="tableWrap" style={{ marginTop: 10 }}>
             <table className="table">
               <thead>
                 <tr>
                   <th>Ruolo</th>
-                  <th>Nome</th>
-                  <th>Email</th>
-                  <th>Telefono</th>
-                  <th>Nomina</th>
+                  <th>Nome e cognome</th>
+                  <th>Data nomina</th>
                   <th>Scadenza</th>
-                  <th>Promemoria</th>
-                  <th>Note</th>
                   <th>Salva</th>
                   <th>Elimina</th>
                 </tr>
               </thead>
 
               <tbody>
-                {client.safetyRoles.map((r: any) => (
+                {safetyRoles.map((r: any) => (
                   <tr key={r.id}>
-                    <td colSpan={10}>
+                    <td colSpan={6}>
                       <form action={saveRole}>
                         <input type="hidden" name="roleId" value={r.id} />
+                        <input type="hidden" name="personId" value={r.personId ?? ""} />
 
                         <div
                           style={{
                             display: "grid",
-                            gridTemplateColumns:
-                              "150px 180px 180px 150px 140px 140px 110px minmax(180px, 1fr) 90px 90px",
+                            gridTemplateColumns: "170px 220px 150px 150px 90px 90px",
                             gap: 8,
                             alignItems: "center",
                           }}
@@ -299,10 +329,6 @@ export default async function ClientOrganigrammaPage({
                           </select>
 
                           <input className="input" name="name" defaultValue={r.name ?? ""} />
-
-                          <input className="input" name="email" defaultValue={r.email ?? ""} />
-
-                          <input className="input" name="phone" defaultValue={r.phone ?? ""} />
 
                           <input
                             className="input"
@@ -318,14 +344,7 @@ export default async function ClientOrganigrammaPage({
                             defaultValue={fmtIso(r.dueDate)}
                           />
 
-                          <input
-                            className="input"
-                            type="number"
-                            name="alertMonths"
-                            defaultValue={r.alertMonths ?? 2}
-                          />
-
-                          <input className="input" name="notes" defaultValue={r.notes ?? ""} />
+                          <input type="hidden" name="period" value={r.notes ?? ""} />
 
                           <button className="btn primary" type="submit">
                             Salva
@@ -341,8 +360,6 @@ export default async function ClientOrganigrammaPage({
                             Elimina
                           </button>
                         </div>
-
-                        <input type="hidden" name="personId" value={r.personId ?? ""} />
                       </form>
                     </td>
                   </tr>
@@ -358,16 +375,57 @@ export default async function ClientOrganigrammaPage({
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h2>Scadenze rapide</h2>
+        <h2>Ordine organigramma</h2>
 
         <div className="muted">
-          Per RLS puoi usare scadenza triennale. Per Primo soccorso puoi usare scadenza triennale.
-          Per altri ruoli puoi lasciare vuoto oppure inserire una data manuale.
+          {ROLES.map((r) => r.label).join(" → ")}
         </div>
 
         <div className="muted" style={{ marginTop: 8 }}>
-          Ruoli disponibili: {ROLES.map((r) => r.label).join(", ")}.
+          Nella scheda cliente compariranno solo le nomine inserite.
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h2>Anteprima stato</h2>
+
+        {safetyRoles.length ? (
+          <table className="table" style={{ marginTop: 10 }}>
+            <thead>
+              <tr>
+                <th>Ruolo</th>
+                <th>Nome e cognome</th>
+                <th>Data nomina</th>
+                <th>Scadenza</th>
+                <th>Stato</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {safetyRoles.map((r: any) => {
+                const badge = safetyDueBadge(r.dueDate);
+
+                return (
+                  <tr key={`preview-${r.id}`}>
+                    <td>
+                      <b>{roleLabel(r.role)}</b>
+                    </td>
+                    <td>{r.name ?? "—"}</td>
+                    <td>{fmt(r.appointedAt)}</td>
+                    <td>{fmt(r.dueDate)}</td>
+                    <td>
+                      <span className={badge.cls}>{badge.label}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="muted" style={{ marginTop: 10 }}>
+            Nessuna nomina inserita.
+          </div>
+        )}
       </div>
     </div>
   );

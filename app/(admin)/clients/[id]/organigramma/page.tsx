@@ -24,27 +24,13 @@ const PERIODS = [
   { value: "QUINQUENNALE", label: "Quinquennale", years: 5 },
 ];
 
-function fmt(d: Date | null | undefined) {
-  return d ? new Date(d).toLocaleDateString("it-IT") : "—";
-}
-
 function fmtIso(d: Date | null | undefined) {
   return d ? new Date(d).toISOString().slice(0, 10) : "";
-}
-
-function roleLabel(v: string | null | undefined) {
-  const s = String(v ?? "").trim().toUpperCase();
-  return ROLES.find((r) => r.value === s)?.label ?? s ?? "—";
 }
 
 function roleOrder(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
   return ROLES.find((r) => r.value === s)?.order ?? 999;
-}
-
-function periodLabel(v: string | null | undefined) {
-  const s = String(v ?? "").trim().toUpperCase();
-  return PERIODS.find((p) => p.value === s)?.label ?? "Manuale";
 }
 
 function yearsFromPeriod(v: string | null | undefined) {
@@ -231,21 +217,21 @@ export default async function ClientOrganigrammaPage({
 
         <div style={{ overflowX: "auto", marginTop: 12 }}>
           <table className="table organigramma-table">
-<thead>
-<tr>
-  <th colSpan={7} style={{padding:0}}>
-    <div className="org-row org-head">
-      <div>Ruolo</div>
-      <div>Nome e cognome</div>
-      <div>Data nomina</div>
-      <div>Periodicità</div>
-      <div>Scadenza</div>
-      <div>Stato</div>
-      <div>Azioni</div>
-    </div>
-  </th>
-</tr>
-</thead>
+            <thead>
+              <tr>
+                <th colSpan={7} style={{ padding: 0 }}>
+                  <div className="org-row org-head">
+                    <div>Ruolo</div>
+                    <div>Nome e cognome</div>
+                    <div>Data nomina</div>
+                    <div>Periodicità</div>
+                    <div>Scadenza</div>
+                    <div>Stato</div>
+                    <div>Azioni</div>
+                  </div>
+                </th>
+              </tr>
+            </thead>
 
             <tbody>
               {safetyRoles.map((r: any) => {
@@ -380,67 +366,52 @@ export default async function ClientOrganigrammaPage({
         ) : null}
       </div>
 
-            .organigramma-table td,
+      <style>{`
+        .organigramma-table {
+          width: 100%;
+          min-width: 1450px;
+        }
+
+        .organigramma-table td,
         .organigramma-table th {
           vertical-align: middle;
         }
 
- .org-row{
-display:grid;
-grid-template-columns:
-160px
-250px
-150px
-150px
-150px
-120px
-170px;
-column-gap:12px;
-align-items:center;
-width:100%;
-}
+        .org-row {
+          display: grid;
+          grid-template-columns: 190px minmax(340px, 1.8fr) 180px 180px 180px 160px 210px;
+          column-gap: 18px;
+          align-items: center;
+          width: 100%;
+        }
 
-.org-head{
-font-weight:700;
-padding:10px 12px;
-background:#f8fafc;
-}
+        .org-head {
+          font-weight: 700;
+          padding: 10px 12px;
+          background: #f8fafc;
+        }
 
-.org-row .input{
-width:100%;
-min-width:0;
-}
+        .org-row .input {
+          width: 100%;
+          min-width: 0;
+        }
 
-.org-row .badge{
-white-space:nowrap;
-}
+        .org-row .badge {
+          justify-self: start;
+          white-space: nowrap;
+        }
 
-.actions{
-display:flex;
-gap:8px;
-justify-content:flex-start;
-}
+        .actions {
+          display: flex;
+          gap: 8px;
+          justify-content: flex-start;
+          flex-wrap: nowrap;
+        }
 
-.table td{
-padding:8px 12px;
-vertical-align:middle;
-}
-
-.org-row .input {
-  width: 100%;
-  min-width: 0;
-}
-
-.org-row .badge {
-  justify-self: start;
-  white-space: nowrap;
-}
-
-.org-row .actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: nowrap;
-}
+        .table td {
+          padding: 8px 12px;
+          vertical-align: middle;
+        }
 
         .new-row {
           background: rgba(37, 99, 235, 0.04);

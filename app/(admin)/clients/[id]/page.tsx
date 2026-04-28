@@ -286,6 +286,25 @@ function getBillingSummary(p: any) {
     activeBillingStatus: activeStep?.billingStatusUpper || "—",
   };
 }
+function normText(v: any) {
+  return String(v ?? "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function trainingPersonName(t: any) {
+  return `${t.__person?.lastName ?? ""} ${t.__person?.firstName ?? ""}`.trim() || "—";
+}
+
+function trainingMansione(t: any) {
+  return t.__person?.role ?? "—";
+}
+
+function isCourse(t: any, words: string[]) {
+  const name = normText(t?.course?.name);
+  return words.some((w) => name.includes(normText(w)));
+}
 
 export default async function ClientDetailPage({
   params,
@@ -448,6 +467,43 @@ const safetyRolesOrdered = [...client.safetyRoles].sort((a: any, b: any) => {
     (acc: number, p: any) => acc + getBillingSummary(p).incassato,
     0
   );
+const prospettoRows = peopleRows.map((p:any) => {
+  const trainings = Array.isArray(p.trainings) ? p.trainings : [];
+
+  const generale = trainings.find((t:any)=>
+    isCourse(t, ["GENERALE"])
+  );
+
+  const specifica = trainings.find((t:any)=>
+    isCourse(t, ["SPEC"])
+  );
+
+  const antincendio = trainings.find((t:any)=>
+    isCourse(t, ["ANTINCENDIO"])
+  );
+
+  const primoSoccorso = trainings.find((t:any)=>
+    isCourse(t, ["PRIMO SOCCORSO"])
+  );
+
+  const preposto = trainings.find((t:any)=>
+    isCourse(t, ["PREPOSTI","PREPOSTO"])
+  );
+
+  return {
+    nome: `${p.lastName} ${p.firstName}`,
+    mansione: p.role || "—",
+    generale,
+    specifica,
+    antincendio,
+    primoSoccorso,
+    preposto,
+  };
+});
+
+const ddlRows = safetyRolesOrdered.filter(
+ (r:any)=> String(r.role).toUpperCase()==="DDL"
+);
 
   return (
     <div className="card">
@@ -952,11 +1008,89 @@ const safetyRolesOrdered = [...client.safetyRoles].sort((a: any, b: any) => {
             Nessun corso associato
           </div>
         )}
-      </div>
+    </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Ingegneria Clinica (VSE)</h2>
+<div className="card" style={{ marginTop: 12 }}>
+  <div className="row" style={{justifyContent:"space-between"}}>
+    <h2>Prospetto Formazione</h2>
+
+    <button className="btn">
+      Stampa prospetto
+    </button>
+  </div>
+
+  <div className="muted" style={{marginTop:6}}>
+    Generato automaticamente da persone, nomine e formazione.
+  </div>
+
+  <div style={{overflowX:"auto", marginTop:12}}>
+    <table className="table">
+      <thead>
+        <tr>
+          <th>Lavoratore</th>
+          <th>Mansione</th>
+          <th>Generale</th>
+          <th>Specifica</th>
+          <th>Antincendio</th>
+          <th>Primo soccorso</th>
+          <th>Preposto</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {prospettoRows.map((r:any)=>(
+          <tr key={r.nome}>
+            <td><b>{r.nome}</b></td>
+            <td>{r.mansione}</td>
+            <td>{fmt(r.generale?.dueDate)}</td>
+            <td>{fmt(r.specifica?.dueDate)}</td>
+            <td>{fmt(r.antincendio?.dueDate)}</td>
+            <td>{fmt(r.primoSoccorso?.dueDate)}</td>
+            <td>{fmt(r.preposto?.dueDate)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  {ddlRows.length ? (
+<>
+<div style={{marginTop:18,fontWeight:800}}>
+Sezione DDL
+</div>
+
+<div style={{overflowX:"auto", marginTop:10}}>
+<table className="table">
+<thead>
+<tr>
+<th>Nominativo</th>
+<th>Nomina</th>
+<th>Scadenza</th>
+</tr>
+</thead>
+
+<tbody>
+{ddlRows.map((r:any)=>(
+<tr key={r.id}>
+<td>
+{r.name || `${r.person?.lastName ?? ""} ${r.person?.firstName ?? ""}`}
+</td>
+<td>{fmt(r.appointedAt)}</td>
+<td>{fmt(r.dueDate)}</td>
+</tr>
+))}
+</tbody>
+</table>
+</div>
+</>
+) : null}
+
+</div>
+
+
+<div className="card" style={{ marginTop: 12 }}>
+  <div className="row" style={{ justifyContent: "space-between" }}>
+    <h2>Ingegneria Clinica (VSE)</h2>
 
           <div className="row" style={{ gap: 8 }}>
             {!isIngegnereClinico ? (

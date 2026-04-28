@@ -17,7 +17,7 @@ const ROLES = [
 ];
 
 const PERIODS = [
-  { value: "", label: "Nessuna / manuale", years: 0 },
+  { value: "", label: "Manuale", years: 0 },
   { value: "ANNUALE", label: "Annuale", years: 1 },
   { value: "BIENNALE", label: "Biennale", years: 2 },
   { value: "TRIENNALE", label: "Triennale", years: 3 },
@@ -42,16 +42,21 @@ function roleOrder(v: string | null | undefined) {
   return ROLES.find((r) => r.value === s)?.order ?? 999;
 }
 
-function addYears(dateRaw: string, years: number) {
-  if (!dateRaw || !years) return "";
-  const d = new Date(`${dateRaw}T12:00:00`);
-  d.setFullYear(d.getFullYear() + years);
-  return d.toISOString().slice(0, 10);
+function periodLabel(v: string | null | undefined) {
+  const s = String(v ?? "").trim().toUpperCase();
+  return PERIODS.find((p) => p.value === s)?.label ?? "Manuale";
 }
 
 function yearsFromPeriod(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
   return PERIODS.find((p) => p.value === s)?.years ?? 0;
+}
+
+function addYears(dateRaw: string, years: number) {
+  if (!dateRaw || !years) return "";
+  const d = new Date(`${dateRaw}T12:00:00`);
+  d.setFullYear(d.getFullYear() + years);
+  return d.toISOString().slice(0, 10);
 }
 
 function startOfDay(d: Date) {
@@ -216,110 +221,40 @@ export default async function ClientOrganigrammaPage({
         Cliente: <b>{client.name}</b>
       </div>
 
-      <form action={saveRole} className="card" style={{ marginTop: 12 }}>
-        <h2>Nuovo ruolo</h2>
-
-        <input type="hidden" name="roleId" value="" />
-
-        <div className="grid3" style={{ marginTop: 12 }}>
-          <div>
-            <label>Ruolo *</label>
-            <select className="input" name="role" required>
-              <option value="">Seleziona</option>
-              {ROLES.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label>Persona già inserita</label>
-            <select className="input" name="personId">
-              <option value="">Manuale / non collegata</option>
-              {people.map((p: any) => (
-                <option key={p.id} value={p.id}>
-                  {p.lastName} {p.firstName}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label>Nome manuale *</label>
-            <input className="input" name="name" placeholder="Nome e cognome" />
-          </div>
-        </div>
-
-        <div className="grid3" style={{ marginTop: 12 }}>
-          <div>
-            <label>Data nomina</label>
-            <input className="input" type="date" name="appointedAt" />
-          </div>
-
-          <div>
-            <label>Periodicità</label>
-            <select className="input" name="period" defaultValue="">
-              {PERIODS.map((p) => (
-                <option key={p.value || "NONE"} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label>Scadenza manuale</label>
-            <input className="input" type="date" name="dueDate" />
-          </div>
-        </div>
-
-        <div className="muted" style={{ marginTop: 8 }}>
-          Se scegli una periodicità e inserisci la data nomina, la scadenza viene calcolata in automatico.
-          Promemoria impostato a 1 mese prima.
-        </div>
-
-        <div className="row" style={{ gap: 8, marginTop: 14 }}>
-          <button className="btn primary" type="submit">
-            Aggiungi ruolo
-          </button>
-        </div>
-      </form>
-
       <div className="card" style={{ marginTop: 12 }}>
         <h2>Ruoli inseriti</h2>
 
-        {safetyRoles.length ? (
-          <div className="tableWrap" style={{ marginTop: 10 }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Ruolo</th>
-                  <th>Nome e cognome</th>
-                  <th>Data nomina</th>
-                  <th>Scadenza</th>
-                  <th>Salva</th>
-                  <th>Elimina</th>
-                </tr>
-              </thead>
+        <div className="muted" style={{ marginTop: 6 }}>
+          Ordine: DDL → Dirigente → Preposto → RSPP → RLS → BLSD → Primo soccorso → Antincendio.
+          Promemoria automatico 1 mese prima della scadenza.
+        </div>
 
-              <tbody>
-                {safetyRoles.map((r: any) => (
+        <div style={{ overflowX: "auto", marginTop: 12 }}>
+          <table className="table organigramma-table">
+            <thead>
+              <tr>
+                <th>Ruolo</th>
+                <th>Nome e cognome</th>
+                <th>Data nomina</th>
+                <th>Periodicità</th>
+                <th>Scadenza</th>
+                <th>Stato</th>
+                <th>Azioni</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {safetyRoles.map((r: any) => {
+                const badge = safetyDueBadge(r.dueDate);
+
+                return (
                   <tr key={r.id}>
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <form action={saveRole}>
                         <input type="hidden" name="roleId" value={r.id} />
                         <input type="hidden" name="personId" value={r.personId ?? ""} />
 
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "170px 220px 150px 150px 90px 90px",
-                            gap: 8,
-                            alignItems: "center",
-                          }}
-                        >
+                        <div className="org-row">
                           <select className="input" name="role" defaultValue={r.role}>
                             {ROLES.map((x) => (
                               <option key={x.value} value={x.value}>
@@ -337,6 +272,14 @@ export default async function ClientOrganigrammaPage({
                             defaultValue={fmtIso(r.appointedAt)}
                           />
 
+                          <select className="input" name="period" defaultValue={r.notes ?? ""}>
+                            {PERIODS.map((p) => (
+                              <option key={p.value || "NONE"} value={p.value}>
+                                {p.label}
+                              </option>
+                            ))}
+                          </select>
+
                           <input
                             className="input"
                             type="date"
@@ -344,89 +287,118 @@ export default async function ClientOrganigrammaPage({
                             defaultValue={fmtIso(r.dueDate)}
                           />
 
-                          <input type="hidden" name="period" value={r.notes ?? ""} />
+                          <span className={badge.cls}>{badge.label}</span>
 
-                          <button className="btn primary" type="submit">
-                            Salva
-                          </button>
+                          <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                            <button className="btn primary" type="submit">
+                              Salva
+                            </button>
 
-                          <button
-                            className="btn"
-                            type="submit"
-                            formAction={deleteRole}
-                            name="roleId"
-                            value={r.id}
-                          >
-                            Elimina
-                          </button>
+                            <button
+                              className="btn"
+                              type="submit"
+                              formAction={deleteRole}
+                              name="roleId"
+                              value={r.id}
+                            >
+                              Elimina
+                            </button>
+                          </div>
                         </div>
                       </form>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessun ruolo inserito.
-          </div>
-        )}
-      </div>
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <h2>Ordine organigramma</h2>
-
-        <div className="muted">
-          {ROLES.map((r) => r.label).join(" → ")}
-        </div>
-
-        <div className="muted" style={{ marginTop: 8 }}>
-          Nella scheda cliente compariranno solo le nomine inserite.
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <h2>Anteprima stato</h2>
-
-        {safetyRoles.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
-            <thead>
-              <tr>
-                <th>Ruolo</th>
-                <th>Nome e cognome</th>
-                <th>Data nomina</th>
-                <th>Scadenza</th>
-                <th>Stato</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {safetyRoles.map((r: any) => {
-                const badge = safetyDueBadge(r.dueDate);
-
-                return (
-                  <tr key={`preview-${r.id}`}>
-                    <td>
-                      <b>{roleLabel(r.role)}</b>
-                    </td>
-                    <td>{r.name ?? "—"}</td>
-                    <td>{fmt(r.appointedAt)}</td>
-                    <td>{fmt(r.dueDate)}</td>
-                    <td>
-                      <span className={badge.cls}>{badge.label}</span>
-                    </td>
-                  </tr>
                 );
               })}
+
+              <tr>
+                <td colSpan={7}>
+                  <form action={saveRole}>
+                    <input type="hidden" name="roleId" value="" />
+
+                    <div className="org-row new-row">
+                      <select className="input" name="role" required defaultValue="">
+                        <option value="">Seleziona ruolo</option>
+                        {ROLES.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      <div>
+                        <select className="input" name="personId" defaultValue="">
+                          <option value="">Manuale / non collegata</option>
+                          {people.map((p: any) => (
+                            <option key={p.id} value={p.id}>
+                              {p.lastName} {p.firstName}
+                            </option>
+                          ))}
+                        </select>
+
+                        <input
+                          className="input"
+                          name="name"
+                          placeholder="Oppure scrivi nome manuale"
+                          style={{ marginTop: 6 }}
+                        />
+                      </div>
+
+                      <input className="input" type="date" name="appointedAt" />
+
+                      <select className="input" name="period" defaultValue="">
+                        {PERIODS.map((p) => (
+                          <option key={p.value || "NONE"} value={p.value}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      <input className="input" type="date" name="dueDate" />
+
+                      <span className="badge muted">Nuovo</span>
+
+                      <button className="btn primary" type="submit">
+                        Aggiungi
+                      </button>
+                    </div>
+                  </form>
+                </td>
+              </tr>
             </tbody>
           </table>
-        ) : (
+        </div>
+
+        {!safetyRoles.length ? (
           <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna nomina inserita.
+            Nessun ruolo inserito. Usa la riga “Nuovo ruolo” per aggiungere la prima nomina.
           </div>
-        )}
+        ) : null}
       </div>
+
+      <style>{`
+        .organigramma-table {
+          min-width: 1180px;
+        }
+
+        .organigramma-table td,
+        .organigramma-table th {
+          vertical-align: middle;
+        }
+
+        .org-row {
+          display: grid;
+          grid-template-columns: 170px 260px 145px 150px 145px 120px 170px;
+          gap: 8px;
+          align-items: center;
+        }
+
+        .new-row {
+          background: rgba(37, 99, 235, 0.04);
+          border-radius: 12px;
+          padding: 8px;
+        }
+      `}</style>
     </div>
   );
 }

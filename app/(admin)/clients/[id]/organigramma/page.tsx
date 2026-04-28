@@ -380,56 +380,7 @@ export default async function ClientOrganigrammaPage({
         ) : null}
       </div>
 
-      <style>{`
-     <style>{`
-  .organigramma-table {
-    width: 100%;
-    min-width: 1350px;
-  }
-
-  .organigramma-table td,
-  .organigramma-table th {
-    vertical-align: middle;
-  }
-
-  .org-row {
-    display: grid;
-    grid-template-columns: 180px minmax(300px, 1.6fr) 170px 170px 170px 150px 190px;
-    column-gap: 16px;
-    align-items: center;
-    width: 100%;
-  }
-
-  .org-head {
-    font-weight: 700;
-    padding: 10px 12px;
-    background: #f8fafc;
-  }
-
-  .org-row .input {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .org-row .badge {
-    justify-self: start;
-    white-space: nowrap;
-  }
-
-  .actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-start;
-    flex-wrap: nowrap;
-  }
-
-  .table td {
-    padding: 8px 12px;
-    vertical-align: middle;
-  }
-`}</style>
-
-        .organigramma-table td,
+            .organigramma-table td,
         .organigramma-table th {
           vertical-align: middle;
         }

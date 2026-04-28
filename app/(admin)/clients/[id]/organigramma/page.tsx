@@ -231,17 +231,21 @@ export default async function ClientOrganigrammaPage({
 
         <div style={{ overflowX: "auto", marginTop: 12 }}>
           <table className="table organigramma-table">
-            <thead>
-              <tr>
-                <th>Ruolo</th>
-                <th>Nome e cognome</th>
-                <th>Data nomina</th>
-                <th>Periodicità</th>
-                <th>Scadenza</th>
-                <th>Stato</th>
-                <th>Azioni</th>
-              </tr>
-            </thead>
+<thead>
+<tr>
+  <th colSpan={7} style={{padding:0}}>
+    <div className="org-row org-head">
+      <div>Ruolo</div>
+      <div>Nome e cognome</div>
+      <div>Data nomina</div>
+      <div>Periodicità</div>
+      <div>Scadenza</div>
+      <div>Stato</div>
+      <div>Azioni</div>
+    </div>
+  </th>
+</tr>
+</thead>
 
             <tbody>
               {safetyRoles.map((r: any) => {
@@ -386,11 +390,45 @@ export default async function ClientOrganigrammaPage({
           vertical-align: middle;
         }
 
-     .org-row {
-  display: grid;
-  grid-template-columns: 150px 230px 135px 140px 135px 120px 150px;
-  gap: 8px;
-  align-items: center;
+ .org-row{
+display:grid;
+grid-template-columns:
+160px
+250px
+150px
+150px
+150px
+120px
+170px;
+column-gap:12px;
+align-items:center;
+width:100%;
+}
+
+.org-head{
+font-weight:700;
+padding:10px 12px;
+background:#f8fafc;
+}
+
+.org-row .input{
+width:100%;
+min-width:0;
+}
+
+.org-row .badge{
+white-space:nowrap;
+}
+
+.actions{
+display:flex;
+gap:8px;
+justify-content:flex-start;
+}
+
+.table td{
+padding:8px 12px;
+vertical-align:middle;
 }
 
 .org-row .input {

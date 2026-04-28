@@ -1010,20 +1010,19 @@ const ddlRows = safetyRolesOrdered.filter(
         )}
     </div>
 
-<div className="card" style={{ marginTop: 12 }}>
-  <div className="row" style={{justifyContent:"space-between"}}>
+
+ <div className="card" style={{ marginTop: 12 }}>
+  <div className="row" style={{ justifyContent: "space-between" }}>
     <h2>Prospetto Formazione</h2>
 
-    <button className="btn">
-      Stampa prospetto
-    </button>
+    <button className="btn">Stampa prospetto</button>
   </div>
 
-  <div className="muted" style={{marginTop:6}}>
+  <div className="muted" style={{ marginTop: 6 }}>
     Generato automaticamente da persone, nomine e formazione.
   </div>
 
-  <div style={{overflowX:"auto", marginTop:12}}>
+  <div style={{ overflowX: "auto", marginTop: 12 }}>
     <table className="table">
       <thead>
         <tr>
@@ -1038,15 +1037,41 @@ const ddlRows = safetyRolesOrdered.filter(
       </thead>
 
       <tbody>
-        {prospettoRows.map((r:any)=>(
+        {prospettoRows.map((r: any) => (
           <tr key={r.nome}>
-            <td><b>{r.nome}</b></td>
+            <td>
+              <b>{r.nome}</b>
+            </td>
             <td>{r.mansione}</td>
-            <td>{fmt(r.generale?.dueDate)}</td>
-            <td>{fmt(r.specifica?.dueDate)}</td>
-            <td>{fmt(r.antincendio?.dueDate)}</td>
-            <td>{fmt(r.primoSoccorso?.dueDate)}</td>
-            <td>{fmt(r.preposto?.dueDate)}</td>
+           <td>
+ <span className={safetyDueBadge(r.generale?.dueDate).cls}>
+  {fmt(r.generale?.dueDate)}
+ </span>
+</td>
+
+<td>
+ <span className={safetyDueBadge(r.specifica?.dueDate).cls}>
+  {fmt(r.specifica?.dueDate)}
+ </span>
+</td>
+
+<td>
+ <span className={safetyDueBadge(r.antincendio?.dueDate).cls}>
+  {fmt(r.antincendio?.dueDate)}
+ </span>
+</td>
+
+<td>
+ <span className={safetyDueBadge(r.primoSoccorso?.dueDate).cls}>
+  {fmt(r.primoSoccorso?.dueDate)}
+ </span>
+</td>
+
+<td>
+ <span className={safetyDueBadge(r.preposto?.dueDate).cls}>
+  {fmt(r.preposto?.dueDate)}
+ </span>
+</td>
           </tr>
         ))}
       </tbody>
@@ -1054,40 +1079,63 @@ const ddlRows = safetyRolesOrdered.filter(
   </div>
 
   {ddlRows.length ? (
-<>
-<div style={{marginTop:18,fontWeight:800}}>
-Sezione DDL
+    <>
+      <div style={{ marginTop: 18, fontWeight: 800 }}>Sezione DDL</div>
+
+      <div style={{ overflowX: "auto", marginTop: 10 }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Nominativo</th>
+              <th>Nomina</th>
+              <th>Scadenza</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {ddlRows.map((r: any) => (
+              <tr key={r.id}>
+                <td>{r.name || `${r.person?.lastName ?? ""} ${r.person?.firstName ?? ""}`}</td>
+                <td>{fmt(r.appointedAt)}</td>
+                <td>{fmt(r.dueDate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  ) : null}
+
+  {safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "RSPP").length ? (
+    <>
+      <div style={{ marginTop: 18, fontWeight: 800 }}>Sezione RSPP</div>
+
+      <div style={{ overflowX: "auto", marginTop: 10 }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Nominativo</th>
+              <th>Nomina</th>
+              <th>Scadenza</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {safetyRolesOrdered
+              .filter((r: any) => String(r.role).toUpperCase() === "RSPP")
+              .map((r: any) => (
+                <tr key={r.id}>
+                  <td>{r.name || `${r.person?.lastName ?? ""} ${r.person?.firstName ?? ""}`}</td>
+                  <td>{fmt(r.appointedAt)}</td>
+                  <td>{fmt(r.dueDate)}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  ) : null}
 </div>
-
-<div style={{overflowX:"auto", marginTop:10}}>
-<table className="table">
-<thead>
-<tr>
-<th>Nominativo</th>
-<th>Nomina</th>
-<th>Scadenza</th>
-</tr>
-</thead>
-
-<tbody>
-{ddlRows.map((r:any)=>(
-<tr key={r.id}>
-<td>
-{r.name || `${r.person?.lastName ?? ""} ${r.person?.firstName ?? ""}`}
-</td>
-<td>{fmt(r.appointedAt)}</td>
-<td>{fmt(r.dueDate)}</td>
-</tr>
-))}
-</tbody>
-</table>
-</div>
-</>
-) : null}
-
-</div>
-
-
 <div className="card" style={{ marginTop: 12 }}>
   <div className="row" style={{ justifyContent: "space-between" }}>
     <h2>Ingegneria Clinica (VSE)</h2>

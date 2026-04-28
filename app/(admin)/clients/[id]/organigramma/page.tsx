@@ -289,7 +289,7 @@ export default async function ClientOrganigrammaPage({
 
                           <span className={badge.cls}>{badge.label}</span>
 
-                          <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                          <div className="actions">
                             <button className="btn primary" type="submit">
                               Salva
                             </button>
@@ -386,12 +386,28 @@ export default async function ClientOrganigrammaPage({
           vertical-align: middle;
         }
 
-        .org-row {
-          display: grid;
-          grid-template-columns: 170px 260px 145px 150px 145px 120px 170px;
-          gap: 8px;
-          align-items: center;
-        }
+     .org-row {
+  display: grid;
+  grid-template-columns: 150px 230px 135px 140px 135px 120px 150px;
+  gap: 8px;
+  align-items: center;
+}
+
+.org-row .input {
+  width: 100%;
+  min-width: 0;
+}
+
+.org-row .badge {
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.org-row .actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
 
         .new-row {
           background: rgba(37, 99, 235, 0.04);

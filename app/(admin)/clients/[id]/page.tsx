@@ -380,6 +380,16 @@ function fullSafetyName(r: any) {
   return String(r?.name ?? "").trim() || fromPerson || "—";
 }
 
+function siteName(site: any) {
+  return site?.name ?? "Generale cliente";
+}
+
+function rowMatchesSite(row: any, selectedSiteId: string | null) {
+  if (!selectedSiteId) return true;
+  if (selectedSiteId === GENERAL_SITE) return !row?.siteId;
+  return row?.siteId === selectedSiteId;
+}
+
 function personBelongsToSelectedSite(p: any, selectedSiteId: string | null) {
   if (!selectedSiteId) return true;
 
@@ -568,15 +578,19 @@ export default async function ClientDetailPage({
 
   const selectedSiteIdRaw = String(searchParams?.siteId ?? "").trim();
   const selectedSiteId = selectedSiteIdRaw || null;
-  const isGeneralFilter = selectedSiteId === GENERAL_SITE;
 
   const client = await prisma.client.findUnique({
     where: { id: params.id },
     include: {
-      contacts: true,
-      sites: true,
+      contacts: {
+        include: { site: true },
+        orderBy: [{ name: "asc" }],
+      },
+      sites: {
+        orderBy: [{ name: "asc" }],
+      },
       safetyRoles: {
-        include: { person: true },
+        include: { person: true, site: true },
         orderBy: [{ role: "asc" }, { name: "asc" }],
       },
       services: {
@@ -608,6 +622,7 @@ export default async function ClientDetailPage({
       },
       practices: {
         include: {
+          site: true,
           billingSteps: {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           },
@@ -639,9 +654,10 @@ export default async function ClientDetailPage({
 
   const returnToParam = encodeURIComponent(returnTo);
 
-  const primaryContact = client.contacts?.[0] ?? null;
+  const contactsRows = client.contacts.filter((c: any) => rowMatchesSite(c, normalizedSelectedSiteId));
+  const primaryContact = contactsRows?.[0] ?? client.contacts?.[0] ?? null;
 
-  const vseRowsAll = await prisma.clinicalEngineeringCheck.findMany({
+  const vseRows = await prisma.clinicalEngineeringCheck.findMany({
     where: {
       clientId: client.id,
       ...(normalizedSelectedSiteId && normalizedSelectedSiteId !== GENERAL_SITE
@@ -649,16 +665,13 @@ export default async function ClientDetailPage({
         : {}),
       ...(normalizedSelectedSiteId === GENERAL_SITE ? { siteId: null } : {}),
     },
+    include: { site: true },
     orderBy: { dataProssimoAppuntamento: "asc" },
   });
 
-  const servicesRows = client.services.filter((s: any) => {
-    if (!normalizedSelectedSiteId) return true;
-    if (normalizedSelectedSiteId === GENERAL_SITE) return !s.siteId;
-    return s.siteId === normalizedSelectedSiteId;
-  });
-
-  const vseRows = vseRowsAll;
+  const servicesRows = client.services.filter((s: any) => rowMatchesSite(s, normalizedSelectedSiteId));
+  const safetyRolesRows = client.safetyRoles.filter((r: any) => rowMatchesSite(r, normalizedSelectedSiteId));
+  const practicesRows = client.practices.filter((p: any) => rowMatchesSite(p, normalizedSelectedSiteId));
 
   const totalServices = servicesRows.length;
 
@@ -723,38 +736,38 @@ export default async function ClientDetailPage({
     .filter((t: any) => Boolean(t?.fatturata))
     .reduce((acc: number, t: any) => acc + toNum(t?.priceEur), 0);
 
-  const apertureCount = client.practices.filter((p: any) => Boolean(p.inApertureList)).length;
+  const apertureCount = practicesRows.filter((p: any) => Boolean(p.inApertureList)).length;
 
-  const practicesInAttesa = client.practices.filter(
+  const practicesInAttesa = practicesRows.filter(
     (p: any) => String(p.apertureStatus ?? "IN_ATTESA").trim().toUpperCase() === "IN_ATTESA"
   ).length;
 
-  const practicesInCorso = client.practices.filter((p: any) =>
+  const practicesInCorso = practicesRows.filter((p: any) =>
     ["INVIATA_REGIONE", "INIZIO_LAVORI", "ACCETTATO", "ISPEZIONE_ASL"].includes(
       String(p.apertureStatus ?? "").trim().toUpperCase()
     )
   ).length;
 
-  const practicesConcluse = client.practices.filter(
+  const practicesConcluse = practicesRows.filter(
     (p: any) => String(p.apertureStatus ?? "").trim().toUpperCase() === "CONCLUSO"
   ).length;
 
-  const totalPracticesValue = client.practices.reduce(
+  const totalPracticesValue = practicesRows.reduce(
     (acc: number, p: any) => acc + getBillingSummary(p).valore,
     0
   );
 
-  const totalBillingFatturato = client.practices.reduce(
+  const totalBillingFatturato = practicesRows.reduce(
     (acc: number, p: any) => acc + getBillingSummary(p).fatturato,
     0
   );
 
-  const totalBillingIncassato = client.practices.reduce(
+  const totalBillingIncassato = practicesRows.reduce(
     (acc: number, p: any) => acc + getBillingSummary(p).incassato,
     0
   );
 
-  const safetyRolesOrdered = [...client.safetyRoles].sort((a: any, b: any) => {
+  const safetyRolesOrdered = [...safetyRolesRows].sort((a: any, b: any) => {
     const byRole = safetyRoleOrder(a.role) - safetyRoleOrder(b.role);
     if (byRole !== 0) return byRole;
     return String(a.name ?? "").localeCompare(String(b.name ?? ""), "it");
@@ -786,7 +799,7 @@ export default async function ClientDetailPage({
   const sezionePreposti = formazioneRows.filter((r: any) => r.preposto);
   const sezioneDdl = formazioneRows.filter((r: any) => r.ddl);
 
-  const rsppRows = normalizedSelectedSiteId ? [] : safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "RSPP");
+  const rsppRows = safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "RSPP");
 
   const ddlTrainingRows = sezioneDdl.map((r: any) => ({ ...r, __training: r.ddl }));
   const rlsTrainingRows = sezioneRls.map((r: any) => ({ ...r, __training: r.rls }));
@@ -900,7 +913,6 @@ export default async function ClientDetailPage({
           }
         }
       `}</style>
-
       <div className="row no-print" style={{ justifyContent: "space-between", alignItems: "center" }}>
         <h1>{client.name}</h1>
 
@@ -912,12 +924,14 @@ export default async function ClientDetailPage({
       </div>
 
       <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h2>Filtro sede</h2>
-        </div>
+        <h2>Filtro sede</h2>
 
         <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-          <Link className="btn" href={siteFilterHref(client.id)} style={filterButtonStyle(!normalizedSelectedSiteId)}>
+          <Link
+            className="btn"
+            href={siteFilterHref(client.id)}
+            style={filterButtonStyle(!normalizedSelectedSiteId)}
+          >
             Tutte le sedi
           </Link>
 
@@ -944,833 +958,311 @@ export default async function ClientDetailPage({
         <div className="muted" style={{ marginTop: 8 }}>
           Vista attiva: <b>{selectedFilterLabel}</b>
         </div>
-
-        {normalizedSelectedSiteId ? (
-          <div className="muted" style={{ marginTop: 6 }}>
-            Nota: pratiche e organigramma non sono ancora filtrabili per sede perché nel database non hanno ancora
-            un campo sede dedicato.
-          </div>
-        ) : null}
       </div>
 
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <h2>Dati generali</h2>
-
-          {!isIngegnereClinico ? (
-            <Link className="btn" href={`/clients/${client.id}/edit`}>
-              Modifica anagrafica
-            </Link>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: 12,
-            marginTop: 12,
-          }}
-        >
-          <div>
-            <div className="muted">Ragione sociale / Nome cliente</div>
-            <div>
-              <b>{client.name}</b>
-            </div>
-          </div>
-
-          <div>
-            <div className="muted">Tipo struttura</div>
-            <div>{client.type ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Stato</div>
-            <div>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  padding: "4px 10px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 800,
-                  ...clientStatusBadgeStyle(client.status),
-                }}
-              >
-                {client.status ?? "—"}
-              </span>
-            </div>
-          </div>
-
-          <div>
-            <div className="muted">P.IVA</div>
-            <div>{client.vatNumber ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Codice Univoco</div>
-            <div>{client.uniqueCode ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">PEC</div>
-            <div>{client.pec ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Email</div>
-            <div>{client.email ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Telefono</div>
-            <div>{client.phone ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Numero dipendenti</div>
-            <div>{client.employeesCount ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Indirizzo</div>
-            <div>{client.address ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Sede legale</div>
-            <div>{client.legalSeat ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Medico competente</div>
-            <div>{client.occupationalDoctorName ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Referente principale</div>
-            <div>{primaryContact?.name ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Ruolo referente</div>
-            <div>{primaryContact?.role ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Telefono referente</div>
-            <div>{primaryContact?.phone ?? "—"}</div>
-          </div>
-
-          <div>
-            <div className="muted">Email referente</div>
-            <div>{primaryContact?.email ?? "—"}</div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <div className="muted">Note cliente</div>
-          <div>{client.notes ?? "—"}</div>
-        </div>
-
-        {primaryContact?.notes ? (
-          <div style={{ marginTop: 12 }}>
-            <div className="muted">Note referente</div>
-            <div>{primaryContact.notes}</div>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Contatti</h2>
-
-          {!isIngegnereClinico ? (
-            <Link className="btn" href={`/clients/${client.id}/contacts?returnTo=${returnToParam}`}>
-              Gestisci contatti
-            </Link>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
+      <div className="card no-print" style={{ marginTop:12 }}>
+        <div className="row" style={{justifyContent:"space-between"}}>
+          <h2>Contatti (filtrati per sede)</h2>
+          <Link className="btn" href={`/clients/${client.id}/contacts?returnTo=${returnToParam}`}>
+            Gestisci contatti
+          </Link>
         </div>
 
         <div className="muted">
-          Totale contatti: <b>{client.contacts.length}</b>
+          Totale contatti in vista: <b>{contactsRows.length}</b>
         </div>
 
-        {client.contacts.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
+        {contactsRows.length ? (
+          <table className="table" style={{marginTop:10}}>
             <thead>
               <tr>
                 <th>Nome</th>
+                <th>Sede</th>
                 <th>Ruolo</th>
-                <th>Lista</th>
                 <th>Email</th>
                 <th>Telefono</th>
               </tr>
             </thead>
             <tbody>
-              {client.contacts.map((c: any) => (
+              {contactsRows.map((c:any)=>(
                 <tr key={c.id}>
-                  <td>
-                    <b>{c.name}</b>
-                  </td>
+                  <td><b>{c.name}</b></td>
+                  <td>{siteName(c.site)}</td>
                   <td>{c.role}</td>
-                  <td>{c.marketingList ?? "ALTRO"}</td>
                   <td>{c.email ?? "—"}</td>
                   <td>{c.phone ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessun contatto
-          </div>
+        ):(
+          <div className="muted" style={{marginTop:10}}>Nessun contatto</div>
         )}
       </div>
 
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Sedi</h2>
-
-          {!isIngegnereClinico ? (
-            <Link className="btn" href={`/clients/${client.id}/sites?returnTo=${returnToParam}`}>
-              Gestisci sedi
-            </Link>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
+      <div className="card no-print" style={{ marginTop:12 }}>
+        <div className="row" style={{justifyContent:"space-between"}}>
+          <h2>Organigramma sicurezza (filtrato per sede)</h2>
+          <Link className="btn primary" href={`/clients/${client.id}/organigramma`}>
+            Gestisci organigramma
+          </Link>
         </div>
 
-        <div className="muted">
-          Totale sedi: <b>{client.sites.length}</b>
-        </div>
-
-        {client.sites.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
-            <thead>
-              <tr>
-                <th>Nome sede</th>
-                <th>Indirizzo</th>
-                <th>Città</th>
-                <th>Provincia</th>
-                <th>CAP</th>
-              </tr>
-            </thead>
-            <tbody>
-              {client.sites.map((s) => (
-                <tr key={s.id}>
-                  <td>
-                    <b>{s.name ?? "—"}</b>
-                  </td>
-                  <td>{s.address ?? "—"}</td>
-                  <td>{"city" in s ? (s as any).city ?? "—" : "—"}</td>
-                  <td>{"province" in s ? (s as any).province ?? "—" : "—"}</td>
-                  <td>{"cap" in s ? (s as any).cap ?? "—" : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna sede
-          </div>
-        )}
-      </div>
-
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Organigramma sicurezza</h2>
-
-          {!isIngegnereClinico ? (
-            <Link className="btn primary" href={`/clients/${client.id}/organigramma`}>
-              Gestisci organigramma
-            </Link>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
-        </div>
-
-        <div className="muted" style={{ marginTop: 6 }}>
-          DDL, RSPP, RLS, Preposto, Primo soccorso, BLSD, Antincendio, Dirigente.
-        </div>
-
-        {normalizedSelectedSiteId ? (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Organigramma non filtrato per sede in questa fase.
-          </div>
-        ) : safetyRolesOrdered.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
+        {safetyRolesOrdered.length ? (
+          <table className="table" style={{marginTop:10}}>
             <thead>
               <tr>
                 <th>Ruolo</th>
-                <th>Nome e cognome</th>
-                <th>Data nomina</th>
+                <th>Nominativo</th>
+                <th>Sede</th>
+                <th>Nomina</th>
                 <th>Scadenza</th>
                 <th>Stato</th>
               </tr>
             </thead>
-
             <tbody>
-              {safetyRolesOrdered.map((r: any) => {
-                const badge = safetyDueBadge(r.dueDate);
-                const fullName = fullSafetyName(r);
+              {safetyRolesOrdered.map((r:any)=>{
+                const badge=safetyDueBadge(r.dueDate);
 
-                return (
+                return(
                   <tr key={r.id}>
-                    <td>
-                      <b>{safetyRoleLabel(r.role)}</b>
-                    </td>
-                    <td>{fullName}</td>
+                    <td><b>{safetyRoleLabel(r.role)}</b></td>
+                    <td>{fullSafetyName(r)}</td>
+                    <td>{siteName(r.site)}</td>
                     <td>{fmt(r.appointedAt)}</td>
                     <td>{fmt(r.dueDate)}</td>
                     <td>
-                      <span className={badge.cls}>{badge.label}</span>
+                      <span className={badge.cls}>
+                        {badge.label}
+                      </span>
                     </td>
                   </tr>
-                );
+                )
               })}
             </tbody>
           </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna nomina inserita.
+        ):(
+          <div className="muted" style={{marginTop:10}}>
+            Nessuna nomina
           </div>
         )}
       </div>
 
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Servizi (mantenimenti)</h2>
+      <div className="card no-print" style={{marginTop:12}}>
+        <h2>Servizi</h2>
 
-          {!isIngegnereClinico ? (
-            <Link className="btn" href={`/clients/${client.id}/services?returnTo=${returnToParam}`}>
-              Gestisci servizi
-            </Link>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
+        <div className="muted">
+          Totale servizi: <b>{totalServices}</b>
         </div>
 
         <div className="muted">
-          Totale servizi in vista: <b>{totalServices}</b>
+          Totale annuo stimato: <b>{eur(annualTotal)}</b>
         </div>
 
-        <div className="muted">
-          Totale annuo stimato in vista: <b>{eur(annualTotal)}</b>
-        </div>
-
-        {servicesRows.length ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Servizio</th>
-                <th>Sede</th>
-                <th>Referente</th>
-                <th>Scadenza</th>
-                <th>Periodicità</th>
-                <th>Prezzo</th>
+        <table className="table" style={{marginTop:10}}>
+          <thead>
+            <tr>
+              <th>Servizio</th>
+              <th>Sede</th>
+              <th>Referente</th>
+              <th>Scadenza</th>
+              <th>Periodicità</th>
+              <th>Prezzo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {servicesRows.map((s:any)=>(
+              <tr key={s.id}>
+                <td><b>{s.service?.name}</b></td>
+                <td>{siteName(s.site)}</td>
+                <td>{getReferenteLabel(s)}</td>
+                <td>{fmt(s.dueDate)}</td>
+                <td>{s.periodicity}</td>
+                <td>{s.priceEur? eur(toNum(s.priceEur)):"—"}</td>
               </tr>
-            </thead>
-
-            <tbody>
-              {servicesRows.map((s: any) => (
-                <tr key={s.id}>
-                  <td>
-                    <b>{s.service?.name}</b>
-                  </td>
-                  <td>{s.site?.name ?? "Generale cliente"}</td>
-                  <td>{getReferenteLabel(s)}</td>
-                  <td>{fmt(s.dueDate)}</td>
-                  <td>{s.periodicity}</td>
-                  <td>{s.priceEur ? eur(toNum(s.priceEur)) : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="muted">Nessun servizio nella vista selezionata</div>
-        )}
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Persone</h2>
-
-          {!isIngegnereClinico ? (
-            <div className="row" style={{ gap: 8 }}>
-              <Link className="btn" href={`/people/new?clientId=${client.id}&returnTo=${returnToParam}`}>
-                Nuova persona
-              </Link>
-              <Link className="btn primary" href={`/people?clientId=${client.id}&returnTo=${returnToParam}`}>
-                Gestisci persone
-              </Link>
-            </div>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
-        </div>
-
-        <div className="muted">
-          Totale persone in vista: <b>{peopleRows.length}</b>
-        </div>
-
-        {peopleRows.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
-            <thead>
-              <tr>
-                <th>Persona</th>
-                <th>Sede</th>
-                <th>Mansione</th>
-                <th>Email</th>
-                <th>Telefono</th>
-                <th>Corsi</th>
-                <th>Fatturati</th>
-              </tr>
-            </thead>
-            <tbody>
-              {peopleRows.map((p: any) => {
-                const trainings = Array.isArray(p.trainings) ? p.trainings : [];
-                const billed = trainings.filter((t: any) => Boolean(t?.fatturata)).length;
-
-                return (
-                  <tr key={p.id}>
-                    <td>
-                      <Link
-                        href={`/people/${p.id}?clientId=${client.id}&returnTo=${returnToParam}`}
-                        style={{ fontWeight: 700 }}
-                      >
-                        {p.lastName} {p.firstName}
-                      </Link>
-                    </td>
-                    <td>{siteNameForPerson(p)}</td>
-                    <td>{p.role ?? "—"}</td>
-                    <td>{p.email ?? "—"}</td>
-                    <td>{p.phone ?? "—"}</td>
-                    <td>{trainings.length}</td>
-                    <td>{billed}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna persona nella vista selezionata
-          </div>
-        )}
-      </div>
-
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Formazione</h2>
-
-          {!isIngegnereClinico ? (
-            <Link className="btn primary" href={`/training?clientId=${client.id}`}>
-              Apri formazione
-            </Link>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
-        </div>
-
-        <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 10 }}>
-          <div className="card">
-            Totale corsi in vista: <b>{trainingRows.length}</b>
-          </div>
-          <div className="card">
-            Scaduti: <b>{trainingScaduti}</b>
-          </div>
-          <div className="card">
-            Fatturati: <b>{trainingFatturati}</b>
-          </div>
-          <div className="card">
-            Valore totale: <b>{eur(trainingTotalValue)}</b>
-          </div>
-          <div className="card">
-            Totale fatturato: <b>{eur(trainingBilledValue)}</b>
-          </div>
-        </div>
-
-        {trainingRows.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
-            <thead>
-              <tr>
-                <th>Persona</th>
-                <th>Sede</th>
-                <th>Corso</th>
-                <th>Effettuato il</th>
-                <th>Scadenza</th>
-                <th>Stato</th>
-                <th>Prezzo</th>
-                <th>Attestato</th>
-                <th>Fatturata</th>
-                <th>Fatturata il</th>
-                <th>Apri</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trainingRows.map((t: any) => (
-                <tr key={t.id}>
-                  <td>
-                    <Link
-                      href={`/people/${t.__person.id}?clientId=${client.id}&returnTo=${returnToParam}`}
-                      style={{ fontWeight: 700 }}
-                    >
-                      {t.__person.lastName} {t.__person.firstName}
-                    </Link>
-                  </td>
-                  <td>{siteNameForPerson(t.__person)}</td>
-                  <td>{t.course?.name ?? "—"}</td>
-                  <td>{fmt(t.performedAt)}</td>
-                  <td>{fmt(t.dueDate)}</td>
-                  <td>{t.status ?? "—"}</td>
-                  <td>{toNum(t.priceEur) > 0 ? eur(toNum(t.priceEur)) : "—"}</td>
-                  <td>{t.certificateDelivered ? "SI" : "NO"}</td>
-                  <td>{t.fatturata ? "SI" : "NO"}</td>
-                  <td>{fmt(t.fatturataAt ?? null)}</td>
-                  <td>
-                    <Link
-                      className="btn"
-                      href={`/people/${t.__person.id}/training/${t.id}/edit?clientId=${client.id}&returnTo=${returnToParam}`}
-                    >
-                      Apri
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessun corso nella vista selezionata
-          </div>
-        )}
-      </div>
-
-      <div id="prospetto-formazione-print" className="card" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
+      <div id="prospetto-formazione-print" className="card" style={{marginTop:12}}>
+        <div className="row" style={{justifyContent:"space-between"}}>
           <h2>Prospetto Formazione</h2>
           <div className="no-print">
-            <PrintButton label="Stampa PDF" />
+            <PrintButton label="Stampa PDF"/>
           </div>
         </div>
 
-        <div className="muted" style={{ marginTop: 6 }}>
-          Cliente: <b>{client.name}</b> — Vista: <b>{selectedFilterLabel}</b>
-        </div>
-
-        <div className="muted" style={{ marginTop: 6 }}>
-          Legenda: <b style={{ color: "#166534" }}>verde</b> = a norma,{" "}
-          <b style={{ color: "#92400e" }}>giallo</b> = scadenza anno in corso,{" "}
-          <b style={{ color: "#b91c1c" }}>rosso</b> = scaduto.
+        <div className="muted" style={{marginTop:6}}>
+          Cliente <b>{client.name}</b> — Vista <b>{selectedFilterLabel}</b>
         </div>
 
         <SectionTitle>DDL</SectionTitle>
-        <DDLTable rows={ddlTrainingRows} />
+        <DDLTable rows={ddlTrainingRows}/>
 
         <SectionTitle>RSPP</SectionTitle>
-        <SafetyRowsTable rows={rsppRows} fallbackLabel="Corso RSPP" />
+        <SafetyRowsTable rows={rsppRows} fallbackLabel="Corso RSPP"/>
 
-        <SectionTitle>RAPPRESENTANTE DEI LAVORATORI PER LA SICUREZZA (RLS)</SectionTitle>
-        <TrainingRowsTable rows={rlsTrainingRows} fallbackLabel="RLS" />
+        <SectionTitle>RLS</SectionTitle>
+        <TrainingRowsTable rows={rlsTrainingRows} fallbackLabel="RLS"/>
 
         <SectionTitle>PREPOSTO</SectionTitle>
-        <TrainingRowsTable rows={prepostoTrainingRows} fallbackLabel="Preposto" />
+        <TrainingRowsTable rows={prepostoTrainingRows} fallbackLabel="Preposto"/>
 
         <SectionTitle>PRIMO SOCCORSO</SectionTitle>
-        <TrainingRowsTable rows={primoSoccorsoTrainingRows} fallbackLabel="Primo soccorso" />
+        <TrainingRowsTable rows={primoSoccorsoTrainingRows} fallbackLabel="Primo Soccorso"/>
 
         <SectionTitle>BLSD</SectionTitle>
-        <TrainingRowsTable rows={blsdTrainingRows} fallbackLabel="BLSD" />
+        <TrainingRowsTable rows={blsdTrainingRows} fallbackLabel="BLSD"/>
 
         <SectionTitle>ANTINCENDIO</SectionTitle>
-        <TrainingRowsTable rows={antincendioTrainingRows} fallbackLabel="Antincendio" />
+        <TrainingRowsTable rows={antincendioTrainingRows} fallbackLabel="Antincendio"/>
 
-        <SectionTitle>FORMAZIONE GENERALE E SPECIFICA DEI LAVORATORI</SectionTitle>
+        <SectionTitle>FORMAZIONE GENERALE E SPECIFICA</SectionTitle>
 
-        <table className="table prospetto-table" style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}>
+        <table className="table prospetto-table" style={{marginTop:8}}>
           <thead>
             <tr>
-              <th style={{ width: "25%" }}>Nominativo</th>
-              <th style={{ width: "30%" }}>Tipologia corso</th>
-              <th style={{ width: "20%" }}>Mansione</th>
-              <th style={{ width: "12.5%" }}>Data attestato</th>
-              <th style={{ width: "12.5%" }}>Scadenza</th>
+              <th>Nominativo</th>
+              <th>Tipologia corso</th>
+              <th>Mansione</th>
+              <th>Data attestato</th>
+              <th>Scadenza</th>
             </tr>
           </thead>
           <tbody>
             {sezioneGeneraleSpecifica.length ? (
-              sezioneGeneraleSpecifica.map((r: any) => (
-                <Fragment key={`${r.nome}-generale-specifica`}>
-                  {r.generale ? (
+              sezioneGeneraleSpecifica.map((r:any)=>(
+                <Fragment key={r.nome}>
+                  {r.generale && (
                     <tr>
                       <td>{r.nome}</td>
-                      <td>{r.generale.course?.name ?? "Formazione generale"}</td>
+                      <td>{r.generale.course?.name}</td>
                       <td>{r.mansione}</td>
                       <td>{fmt(r.generale.performedAt)}</td>
-                      <td>
-                        <DueCell date={r.generale.dueDate} />
-                      </td>
+                      <td><DueCell date={r.generale.dueDate}/></td>
                     </tr>
-                  ) : null}
+                  )}
 
-                  {r.specifica ? (
+                  {r.specifica && (
                     <tr>
                       <td>{r.nome}</td>
-                      <td>{r.specifica.course?.name ?? "Formazione specifica"}</td>
+                      <td>{r.specifica.course?.name}</td>
                       <td>{r.mansione}</td>
                       <td>{fmt(r.specifica.performedAt)}</td>
-                      <td>
-                        <DueCell date={r.specifica.dueDate} />
-                      </td>
+                      <td><DueCell date={r.specifica.dueDate}/></td>
                     </tr>
-                  ) : null}
+                  )}
                 </Fragment>
               ))
-            ) : (
+            ):(
               <tr>
-                <td colSpan={5} className="muted">
-                  Nessun dato presente.
-                </td>
+                <td colSpan={5}>Nessun dato</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Ingegneria Clinica (VSE)</h2>
+      <div className="card no-print" style={{marginTop:12}}>
+        <h2>Ingegneria Clinica</h2>
 
-          <div className="row" style={{ gap: 8 }}>
-            {!isIngegnereClinico ? (
-              <Link
-                className="btn"
-                href={`/ingegneria-clinica/new?clientId=${client.id}&returnTo=${returnToParam}`}
-              >
-                Nuova verifica
-              </Link>
-            ) : null}
+        <table className="table" style={{marginTop:10}}>
+          <thead>
+            <tr>
+              <th>Sede</th>
+              <th>Prossimo appuntamento</th>
+              <th>Stato</th>
+              <th>Importo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vseRows.map((r:any)=>{
+              const badge=vseBadge(r.dataProssimoAppuntamento);
 
-            <Link
-              className="btn primary"
-              href={`/ingegneria-clinica?clientId=${client.id}&returnTo=${returnToParam}`}
-            >
-              Gestisci verifiche
-            </Link>
-          </div>
-        </div>
-
-        <div className="muted">
-          Totale verifiche in vista: <b>{vseRows.length}</b>
-        </div>
-
-        {vseRows.length ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Sede</th>
-                <th>Prossimo appuntamento</th>
-                <th>Stato</th>
-                <th>€ Servizio</th>
-                <th>Apri</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {vseRows.map((r: any) => {
-                const badge = vseBadge(r.dataProssimoAppuntamento);
-
-                return (
-                  <tr key={r.id}>
-                    <td>{r.site?.name ?? r.nomeSedeSnapshot ?? "Generale cliente"}</td>
-                    <td>{fmt(r.dataProssimoAppuntamento)}</td>
-                    <td>
-                      <span className={badge.cls}>{badge.label}</span>
-                    </td>
-                    <td>{eur(toNum(r.costoServizio))}</td>
-                    <td>
-                      <Link
-                        className="btn"
-                        href={`/ingegneria-clinica/${r.id}?clientId=${client.id}&returnTo=${returnToParam}`}
-                      >
-                        Apri
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna verifica nella vista selezionata
-          </div>
-        )}
+              return(
+                <tr key={r.id}>
+                  <td>{r.site?.name ?? r.nomeSedeSnapshot ?? "Generale cliente"}</td>
+                  <td>{fmt(r.dataProssimoAppuntamento)}</td>
+                  <td>
+                    <span className={badge.cls}>
+                      {badge.label}
+                    </span>
+                  </td>
+                  <td>{eur(toNum(r.costoServizio))}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
 
-      <div className="card no-print" style={{ marginTop: 12 }}>
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2>Pratiche</h2>
+      <div className="card no-print" style={{marginTop:12}}>
+        <h2>Pratiche (filtrate per sede)</h2>
 
-          {!isIngegnereClinico ? (
-            <div className="row" style={{ gap: 8 }}>
-              <Link className="btn" href={`/clients/${client.id}/practices/new`}>
-                Nuova pratica
-              </Link>
-              <Link className="btn" href="/aperture">
-                Vai ad Aperture
-              </Link>
-              <Link className="btn primary" href="/pratiche-fatturazione">
-                Fatturazione pratiche
-              </Link>
-            </div>
-          ) : (
-            <div className="muted">Sola consultazione</div>
-          )}
-        </div>
+        <div className="row" style={{gap:12,flexWrap:"wrap",marginTop:10}}>
+          <div className="card">
+            Aperture <b>{apertureCount}</b>
+          </div>
 
-        {normalizedSelectedSiteId ? (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Pratiche non filtrate per sede in questa fase.
+          <div className="card">
+            In attesa <b>{practicesInAttesa}</b>
           </div>
-        ) : null}
 
-        <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 10 }}>
           <div className="card">
-            In Aperture: <b>{apertureCount}</b>
+            In corso <b>{practicesInCorso}</b>
           </div>
+
           <div className="card">
-            In attesa: <b>{practicesInAttesa}</b>
-          </div>
-          <div className="card">
-            In corso: <b>{practicesInCorso}</b>
-          </div>
-          <div className="card">
-            Concluse: <b>{practicesConcluse}</b>
-          </div>
-          <div className="card">
-            Valore SAL: <b>{eur(totalPracticesValue)}</b>
-          </div>
-          <div className="card">
-            Fatturato SAL: <b>{eur(totalBillingFatturato)}</b>
-          </div>
-          <div className="card">
-            Incassato SAL: <b>{eur(totalBillingIncassato)}</b>
+            Concluse <b>{practicesConcluse}</b>
           </div>
         </div>
 
-        {client.practices.length ? (
-          <table className="table" style={{ marginTop: 10 }}>
-            <thead>
-              <tr>
-                <th>Pratica</th>
-                <th>Data</th>
-                <th>Anno</th>
-                <th>Stato</th>
-                <th>In Aperture</th>
-                <th>Valore SAL</th>
-                <th>Incassato</th>
-                <th>Residuo</th>
-                <th>Stato SAL</th>
-                <th>Apri</th>
-              </tr>
-            </thead>
-            <tbody>
-              {client.practices.map((p: any) => {
-                const billing = getBillingSummary(p);
+        <table className="table" style={{marginTop:10}}>
+          <thead>
+            <tr>
+              <th>Pratica</th>
+              <th>Sede</th>
+              <th>Data</th>
+              <th>Stato</th>
+              <th>Valore SAL</th>
+              <th>Incassato</th>
+              <th>Residuo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {practicesRows.map((p:any)=>{
+              const billing=getBillingSummary(p)
 
-                return (
-                  <tr key={p.id}>
-                    <td>
-                      <b>{p.title ?? "—"}</b>
-                    </td>
-                    <td>{fmt(p.practiceDate)}</td>
-                    <td>{getStartYear(p)}</td>
-                    <td>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "4px 10px",
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 800,
-                          ...practiceStatusBadgeStyle(p.apertureStatus),
-                        }}
-                      >
-                        {getPracticeStatusLabel(p.apertureStatus)}
-                      </span>
-                    </td>
-                    <td>{p.inApertureList ? "SI" : "NO"}</td>
-                    <td>{billing.valore > 0 ? eur(billing.valore) : "—"}</td>
-                    <td>{billing.incassato > 0 ? eur(billing.incassato) : "—"}</td>
-                    <td>{billing.valore > 0 ? eur(billing.residuo) : "—"}</td>
-                    <td>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 6,
-                          alignItems: "flex-start",
-                        }}
-                      >
-                        {billing.activeTriggerStatus ? (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              padding: "4px 10px",
-                              borderRadius: 999,
-                              fontSize: 12,
-                              fontWeight: 800,
-                              ...practiceStatusBadgeStyle(billing.activeTriggerStatus),
-                            }}
-                          >
-                            {getPracticeStatusLabel(billing.activeTriggerStatus)}
-                          </span>
-                        ) : null}
+              return(
+                <tr key={p.id}>
+                  <td><b>{p.title}</b></td>
+                  <td>{siteName(p.site)}</td>
+                  <td>{fmt(p.practiceDate)}</td>
+                  <td>
+                    <span
+                      style={{
+                        display:"inline-flex",
+                        padding:"4px 10px",
+                        borderRadius:999,
+                        fontWeight:800,
+                        ...practiceStatusBadgeStyle(p.apertureStatus)
+                      }}
+                    >
+                      {getPracticeStatusLabel(p.apertureStatus)}
+                    </span>
+                  </td>
 
-                        {billing.activeBillingStatus !== "—" ? (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              padding: "4px 10px",
-                              borderRadius: 999,
-                              fontSize: 12,
-                              fontWeight: 800,
-                              ...billingStatusStyle(billing.activeBillingStatus),
-                            }}
-                          >
-                            {billingStatusLabel(billing.activeBillingStatus)}
-                          </span>
-                        ) : (
-                          <span className="badge muted">—</span>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <Link className="btn" href={`/clients/${client.id}/practices/${p.id}`}>
-                        Apri
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna pratica
-          </div>
-        )}
+                  <td>{eur(billing.valore)}</td>
+                  <td>{eur(billing.incassato)}</td>
+                  <td>{eur(billing.residuo)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
+
     </div>
   );
 }

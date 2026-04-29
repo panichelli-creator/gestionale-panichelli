@@ -51,6 +51,7 @@ model Client {
 model ClientContact {
   id            String                       @id @default(cuid())
   clientId      String
+  siteId        String?
   role          String                       @default("ALTRO")
   name          String
   email         String?
@@ -60,9 +61,11 @@ model ClientContact {
   updatedAt     DateTime                     @updatedAt
   marketingList String?                      @default("ALTRO")
   client        Client                       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  site          ClientSite?                  @relation(fields: [siteId], references: [id])
   marketingMaps ClientContactMarketingList[]
 
   @@index([clientId])
+  @@index([siteId])
   @@index([marketingList])
   @@index([role])
 }
@@ -96,8 +99,9 @@ model ClientContactMarketingList {
 }
 
 model ClientSafetyRole {
-  id          String    @id @default(cuid())
+  id          String      @id @default(cuid())
   clientId    String
+  siteId      String?
   personId    String?
   role        String
   name        String
@@ -105,15 +109,17 @@ model ClientSafetyRole {
   phone       String?
   appointedAt DateTime?
   dueDate     DateTime?
-  alertMonths Int       @default(2)
+  alertMonths Int         @default(2)
   notes       String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
-  client Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  person Person? @relation(fields: [personId], references: [id])
+  client Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  site   ClientSite? @relation(fields: [siteId], references: [id])
+  person Person?     @relation(fields: [personId], references: [id])
 
   @@index([clientId])
+  @@index([siteId])
   @@index([personId])
   @@index([role])
   @@index([dueDate])
@@ -132,6 +138,9 @@ model ClientSite {
   updatedAt      DateTime                   @updatedAt
   clientServices ClientService[]
   client         Client                     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contacts       ClientContact[]
+  safetyRoles    ClientSafetyRole[]
+  practices      ClientPractice[]
   clinicalChecks ClinicalEngineeringCheck[]
   mapPlans       MapPlanItem[]
   personSites    PersonSite[]
@@ -308,6 +317,7 @@ model TrainingRecord {
 model ClientPractice {
   id              String                @id @default(cuid())
   clientId        String
+  siteId          String?
   title           String
   practiceDate    DateTime?
   determinaNumber String?
@@ -321,9 +331,11 @@ model ClientPractice {
   fatturata       Boolean               @default(false)
   fatturataAt     DateTime?
   client          Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  site            ClientSite?           @relation(fields: [siteId], references: [id])
   billingSteps    PracticeBillingStep[]
 
   @@index([clientId])
+  @@index([siteId])
   @@index([practiceDate])
   @@index([inApertureList])
   @@index([apertureStatus])

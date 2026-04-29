@@ -136,6 +136,7 @@ function DueCell({ date }: { date: Date | null | undefined }) {
       style={{
         display: "inline-flex",
         alignItems: "center",
+        justifyContent: "center",
         padding: "4px 10px",
         borderRadius: 999,
         fontSize: 12,
@@ -373,14 +374,83 @@ function fullSafetyName(r: any) {
   return String(r?.name ?? "").trim() || fromPerson || "—";
 }
 
-function SafetyRowsTable({ rows }: { rows: any[] }) {
+function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <table className="table" style={{ marginTop: 8 }}>
+    <div
+      className="print-section-title"
+      style={{
+        marginTop: 18,
+        fontWeight: 900,
+        fontSize: 16,
+        textAlign: "center",
+        letterSpacing: 0.2,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DDLTable({ rows }: { rows: any[] }) {
+  return (
+    <table
+      className="table prospetto-table"
+      style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}
+    >
       <thead>
         <tr>
-          <th>Nominativo</th>
-          <th>Nomina</th>
-          <th>Scadenza</th>
+          <th style={{ width: "35%" }}>Nominativo</th>
+          <th style={{ width: "35%" }}>Tipologia corso</th>
+          <th style={{ width: "15%" }}>Data attestato</th>
+          <th style={{ width: "15%" }}>Scadenza</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length ? (
+          rows.map((r: any) => {
+            const t = r.__training;
+            return (
+              <tr key={`${r.nome}-${t?.id ?? "ddl"}`}>
+                <td>{r.nome}</td>
+                <td>{t?.course?.name ?? "Corso DDL"}</td>
+                <td>{fmt(t?.performedAt)}</td>
+                <td>
+                  <DueCell date={t?.dueDate} />
+                </td>
+              </tr>
+            );
+          })
+        ) : (
+          <tr>
+            <td colSpan={4} className="muted">
+              Nessun dato presente.
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+function SafetyRowsTable({
+  rows,
+  fallbackLabel,
+}: {
+  rows: any[];
+  fallbackLabel: string;
+}) {
+  return (
+    <table
+      className="table prospetto-table"
+      style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}
+    >
+      <thead>
+        <tr>
+          <th style={{ width: "25%" }}>Nominativo</th>
+          <th style={{ width: "30%" }}>Tipologia corso</th>
+          <th style={{ width: "20%" }}>Mansione</th>
+          <th style={{ width: "12.5%" }}>Data attestato</th>
+          <th style={{ width: "12.5%" }}>Scadenza</th>
         </tr>
       </thead>
       <tbody>
@@ -388,6 +458,8 @@ function SafetyRowsTable({ rows }: { rows: any[] }) {
           rows.map((r: any) => (
             <tr key={r.id}>
               <td>{fullSafetyName(r)}</td>
+              <td>{fallbackLabel}</td>
+              <td>{safetyRoleLabel(r.role)}</td>
               <td>{fmt(r.appointedAt)}</td>
               <td>
                 <DueCell date={r.dueDate} />
@@ -396,7 +468,7 @@ function SafetyRowsTable({ rows }: { rows: any[] }) {
           ))
         ) : (
           <tr>
-            <td colSpan={3} className="muted">
+            <td colSpan={5} className="muted">
               Nessun dato presente.
             </td>
           </tr>
@@ -414,14 +486,17 @@ function TrainingRowsTable({
   fallbackLabel: string;
 }) {
   return (
-    <table className="table" style={{ marginTop: 8 }}>
+    <table
+      className="table prospetto-table"
+      style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}
+    >
       <thead>
         <tr>
-          <th>Nominativo</th>
-          <th>Tipologia corso</th>
-          <th>Mansione</th>
-          <th>Data attestato</th>
-          <th>Scadenza</th>
+          <th style={{ width: "25%" }}>Nominativo</th>
+          <th style={{ width: "30%" }}>Tipologia corso</th>
+          <th style={{ width: "20%" }}>Mansione</th>
+          <th style={{ width: "12.5%" }}>Data attestato</th>
+          <th style={{ width: "12.5%" }}>Scadenza</th>
         </tr>
       </thead>
       <tbody>
@@ -657,6 +732,19 @@ export default async function ClientDetailPage({
   return (
     <div className="card">
       <style>{`
+        #prospetto-formazione-print .prospetto-table {
+          table-layout: fixed;
+          width: 100%;
+        }
+
+        #prospetto-formazione-print .print-section-title {
+          font-weight: 900;
+          font-size: 16px;
+          text-align: center;
+          margin-top: 18px;
+          letter-spacing: 0.2px;
+        }
+
         @media print {
           html,
           body {
@@ -699,6 +787,7 @@ export default async function ClientDetailPage({
           #prospetto-formazione-print .table {
             width: 100% !important;
             border-collapse: collapse !important;
+            table-layout: fixed !important;
             font-size: 8px !important;
           }
 
@@ -707,6 +796,7 @@ export default async function ClientDetailPage({
             border: 1px solid #111 !important;
             padding: 2px 4px !important;
             color: #000 !important;
+            vertical-align: middle !important;
           }
 
           #prospetto-formazione-print h2 {
@@ -1258,39 +1348,40 @@ export default async function ClientDetailPage({
           <b style={{ color: "#b91c1c" }}>rosso</b> = scaduto.
         </div>
 
-        <div className="print-section-title">DDL</div>
-        <TrainingRowsTable rows={ddlTrainingRows} fallbackLabel="Corso DDL" />
+        <SectionTitle>DDL</SectionTitle>
+        <DDLTable rows={ddlTrainingRows} />
 
-        <div className="print-section-title">RSPP</div>
-        <SafetyRowsTable rows={rsppRows} />
+        <SectionTitle>RSPP</SectionTitle>
+        <SafetyRowsTable rows={rsppRows} fallbackLabel="Corso RSPP" />
 
-        <div className="print-section-title">
-          RAPPRESENTANTE DEI LAVORATORI PER LA SICUREZZA (RLS)
-        </div>
+        <SectionTitle>RAPPRESENTANTE DEI LAVORATORI PER LA SICUREZZA (RLS)</SectionTitle>
         <TrainingRowsTable rows={rlsTrainingRows} fallbackLabel="RLS" />
 
-        <div className="print-section-title">PREPOSTO</div>
+        <SectionTitle>PREPOSTO</SectionTitle>
         <TrainingRowsTable rows={prepostoTrainingRows} fallbackLabel="Preposto" />
 
-        <div className="print-section-title">PRIMO SOCCORSO</div>
+        <SectionTitle>PRIMO SOCCORSO</SectionTitle>
         <TrainingRowsTable rows={primoSoccorsoTrainingRows} fallbackLabel="Primo soccorso" />
 
-        <div className="print-section-title">BLSD</div>
+        <SectionTitle>BLSD</SectionTitle>
         <TrainingRowsTable rows={blsdTrainingRows} fallbackLabel="BLSD" />
 
-        <div className="print-section-title">ANTINCENDIO</div>
+        <SectionTitle>ANTINCENDIO</SectionTitle>
         <TrainingRowsTable rows={antincendioTrainingRows} fallbackLabel="Antincendio" />
 
-        <div className="print-section-title">FORMAZIONE GENERALE E SPECIFICA DEI LAVORATORI</div>
+        <SectionTitle>FORMAZIONE GENERALE E SPECIFICA DEI LAVORATORI</SectionTitle>
 
-        <table className="table" style={{ marginTop: 8 }}>
+        <table
+          className="table prospetto-table"
+          style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}
+        >
           <thead>
             <tr>
-              <th>Nominativo</th>
-              <th>Tipologia corso</th>
-              <th>Mansione</th>
-              <th>Data attestato</th>
-              <th>Scadenza</th>
+              <th style={{ width: "25%" }}>Nominativo</th>
+              <th style={{ width: "30%" }}>Tipologia corso</th>
+              <th style={{ width: "20%" }}>Mansione</th>
+              <th style={{ width: "12.5%" }}>Data attestato</th>
+              <th style={{ width: "12.5%" }}>Scadenza</th>
             </tr>
           </thead>
           <tbody>

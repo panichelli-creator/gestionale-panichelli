@@ -1,13 +1,13 @@
 "use client";
 
-export default function PrintButton() {
+export default function PrintButton({
+  label = "Stampa prospetto",
+}: {
+  label?: string;
+}) {
   return (
-    <button
-      className="btn"
-      onClick={() => window.print()}
-      style={{ display: "inline-flex", alignItems: "center" }}
-    >
-      🖨️ Stampa
+    <button className="btn" type="button" onClick={() => window.print()}>
+      {label}
     </button>
   );
 }

@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
+import PrintButton from "@/components/PrintButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -79,17 +80,86 @@ function safetyDueBadge(d: Date | null | undefined) {
   return { label: "In regola", cls: "badge ok" };
 }
 
+function prospettoDueStyle(d: Date | null | undefined) {
+  if (!d) {
+    return {
+      label: "—",
+      style: {
+        background: "rgba(0,0,0,0.04)",
+        color: "rgba(0,0,0,0.70)",
+        border: "1px solid rgba(0,0,0,0.12)",
+      },
+    };
+  }
+
+  const today = startOfDay(new Date());
+  const due = startOfDay(new Date(d));
+  const currentYear = today.getFullYear();
+
+  if (due < today) {
+    return {
+      label: fmt(d),
+      style: {
+        background: "rgba(239,68,68,0.12)",
+        color: "#b91c1c",
+        border: "1px solid rgba(239,68,68,0.35)",
+      },
+    };
+  }
+
+  if (due.getFullYear() === currentYear) {
+    return {
+      label: fmt(d),
+      style: {
+        background: "rgba(245,158,11,0.16)",
+        color: "#92400e",
+        border: "1px solid rgba(245,158,11,0.38)",
+      },
+    };
+  }
+
+  return {
+    label: fmt(d),
+    style: {
+      background: "rgba(34,197,94,0.13)",
+      color: "#166534",
+      border: "1px solid rgba(34,197,94,0.35)",
+    },
+  };
+}
+
+function DueCell({ date }: { date: Date | null | undefined }) {
+  const badge = prospettoDueStyle(date);
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "4px 10px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 800,
+        whiteSpace: "nowrap",
+        ...badge.style,
+      }}
+    >
+      {badge.label}
+    </span>
+  );
+}
+
 function safetyRoleOrder(v: string | null | undefined) {
   const s = String(v ?? "").trim().toUpperCase();
 
   if (s === "DDL") return 1;
-  if (s === "DIRIGENTE") return 2;
-  if (s === "PREPOSTO") return 3;
-  if (s === "RSPP") return 4;
-  if (s === "RLS") return 5;
+  if (s === "RSPP") return 2;
+  if (s === "RLS") return 3;
+  if (s === "PREPOSTO") return 4;
+  if (s === "PRIMO_SOCCORSO") return 5;
   if (s === "BLSD") return 6;
-  if (s === "PRIMO_SOCCORSO") return 7;
-  if (s === "ANTINCENDIO") return 8;
+  if (s === "ANTINCENDIO") return 7;
+  if (s === "DIRIGENTE") return 8;
 
   return 999;
 }
@@ -298,6 +368,90 @@ function isCourse(t: any, words: string[]) {
   return words.some((w) => name.includes(normText(w)));
 }
 
+function fullSafetyName(r: any) {
+  const fromPerson = `${r?.person?.lastName ?? ""} ${r?.person?.firstName ?? ""}`.trim();
+  return String(r?.name ?? "").trim() || fromPerson || "—";
+}
+
+function SafetyRowsTable({ rows }: { rows: any[] }) {
+  return (
+    <table className="table" style={{ marginTop: 8 }}>
+      <thead>
+        <tr>
+          <th>Nominativo</th>
+          <th>Nomina</th>
+          <th>Scadenza</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length ? (
+          rows.map((r: any) => (
+            <tr key={r.id}>
+              <td>{fullSafetyName(r)}</td>
+              <td>{fmt(r.appointedAt)}</td>
+              <td>
+                <DueCell date={r.dueDate} />
+              </td>
+            </tr>
+          ))
+        ) : (
+          <tr>
+            <td colSpan={3} className="muted">
+              Nessun dato presente.
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+function TrainingRowsTable({
+  rows,
+  fallbackLabel,
+}: {
+  rows: any[];
+  fallbackLabel: string;
+}) {
+  return (
+    <table className="table" style={{ marginTop: 8 }}>
+      <thead>
+        <tr>
+          <th>Nominativo</th>
+          <th>Tipologia corso</th>
+          <th>Mansione</th>
+          <th>Data attestato</th>
+          <th>Scadenza</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length ? (
+          rows.map((r: any) => {
+            const t = r.__training;
+            return (
+              <tr key={`${r.nome}-${t?.id ?? fallbackLabel}`}>
+                <td>{r.nome}</td>
+                <td>{t?.course?.name ?? fallbackLabel}</td>
+                <td>{r.mansione}</td>
+                <td>{fmt(t?.performedAt)}</td>
+                <td>
+                  <DueCell date={t?.dueDate} />
+                </td>
+              </tr>
+            );
+          })
+        ) : (
+          <tr>
+            <td colSpan={5} className="muted">
+              Nessun dato presente.
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
 export default async function ClientDetailPage({
   params,
 }: {
@@ -464,7 +618,7 @@ export default async function ClientDetailPage({
     const trainings = Array.isArray(p.trainings) ? p.trainings : [];
 
     return {
-      nome: `${p.lastName} ${p.firstName}`,
+      nome: `${p.lastName} ${p.firstName}`.trim(),
       mansione: p.role || "—",
       generale: trainings.find((t: any) => isCourse(t, ["GENERALE"])),
       specifica: trainings.find((t: any) => isCourse(t, ["SPEC"])),
@@ -483,17 +637,72 @@ export default async function ClientDetailPage({
   const sezioneRls = formazioneRows.filter((r: any) => r.rls);
   const sezionePreposti = formazioneRows.filter((r: any) => r.preposto);
 
-  const ddlRows = safetyRolesOrdered.filter(
-    (r: any) => String(r.role).toUpperCase() === "DDL"
-  );
+  const ddlRows = safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "DDL");
+  const rsppRows = safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "RSPP");
 
-  const rsppRows = safetyRolesOrdered.filter(
-    (r: any) => String(r.role).toUpperCase() === "RSPP"
-  );
+  const rlsTrainingRows = sezioneRls.map((r: any) => ({ ...r, __training: r.rls }));
+  const prepostoTrainingRows = sezionePreposti.map((r: any) => ({ ...r, __training: r.preposto }));
+  const primoSoccorsoTrainingRows = sezionePrimoSoccorso.map((r: any) => ({
+    ...r,
+    __training: r.primoSoccorso,
+  }));
+  const blsdTrainingRows = sezioneBlsd.map((r: any) => ({ ...r, __training: r.blsd }));
+  const antincendioTrainingRows = sezioneAntincendio.map((r: any) => ({
+    ...r,
+    __training: r.antincendio,
+  }));
 
   return (
     <div className="card">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+
+          #prospetto-formazione-print,
+          #prospetto-formazione-print * {
+            visibility: visible;
+          }
+
+          #prospetto-formazione-print {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            background: white;
+            padding: 0;
+            margin: 0;
+          }
+
+          .no-print {
+            display: none !important;
+          }
+
+          #prospetto-formazione-print .table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+          }
+
+          #prospetto-formazione-print .table th,
+          #prospetto-formazione-print .table td {
+            border: 1px solid #111;
+            padding: 5px 6px;
+          }
+
+          #prospetto-formazione-print h2 {
+            text-align: center;
+          }
+
+          @page {
+            size: A4;
+            margin: 12mm;
+          }
+        }
+      `}</style>
+
+      <div className="row no-print" style={{ justifyContent: "space-between", alignItems: "center" }}>
         <h1>{client.name}</h1>
 
         <div className="row" style={{ gap: 8 }}>
@@ -503,7 +712,7 @@ export default async function ClientDetailPage({
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
           <h2>Dati generali</h2>
 
@@ -634,7 +843,7 @@ export default async function ClientDetailPage({
         ) : null}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Contatti</h2>
 
@@ -683,7 +892,7 @@ export default async function ClientDetailPage({
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Sedi</h2>
 
@@ -732,7 +941,7 @@ export default async function ClientDetailPage({
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Organigramma sicurezza</h2>
 
@@ -746,7 +955,7 @@ export default async function ClientDetailPage({
         </div>
 
         <div className="muted" style={{ marginTop: 6 }}>
-          DDL, Dirigente, Preposto, RSPP, RLS, BLSD, Addetto primo soccorso, Addetto antincendio.
+          DDL, RSPP, RLS, Preposto, Primo soccorso, BLSD, Antincendio, Dirigente.
         </div>
 
         {safetyRolesOrdered.length ? (
@@ -764,16 +973,14 @@ export default async function ClientDetailPage({
             <tbody>
               {safetyRolesOrdered.map((r: any) => {
                 const badge = safetyDueBadge(r.dueDate);
-                const fullName = r.person
-                  ? `${r.person.lastName ?? ""} ${r.person.firstName ?? ""}`.trim()
-                  : String(r.name ?? "").trim();
+                const fullName = fullSafetyName(r);
 
                 return (
                   <tr key={r.id}>
                     <td>
                       <b>{safetyRoleLabel(r.role)}</b>
                     </td>
-                    <td>{fullName || "—"}</td>
+                    <td>{fullName}</td>
                     <td>{fmt(r.appointedAt)}</td>
                     <td>{fmt(r.dueDate)}</td>
                     <td>
@@ -791,7 +998,7 @@ export default async function ClientDetailPage({
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Servizi (mantenimenti)</h2>
 
@@ -845,7 +1052,7 @@ export default async function ClientDetailPage({
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Persone</h2>
 
@@ -911,7 +1118,7 @@ export default async function ClientDetailPage({
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Formazione</h2>
 
@@ -996,15 +1203,46 @@ export default async function ClientDetailPage({
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div id="prospetto-formazione-print" className="card" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Prospetto Formazione</h2>
-          <button className="btn">Stampa prospetto</button>
+          <div className="no-print">
+            <PrintButton label="Stampa PDF" />
+          </div>
         </div>
 
         <div className="muted" style={{ marginTop: 6 }}>
-          Generato automaticamente da persone, nomine e formazione.
+          Cliente: <b>{client.name}</b> — Generato automaticamente da persone, nomine e formazione.
         </div>
+
+        <div className="muted" style={{ marginTop: 6 }}>
+          Legenda: <b style={{ color: "#166534" }}>verde</b> = a norma,{" "}
+          <b style={{ color: "#92400e" }}>giallo</b> = scadenza anno in corso,{" "}
+          <b style={{ color: "#b91c1c" }}>rosso</b> = scaduto.
+        </div>
+
+        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>DDL</div>
+        <SafetyRowsTable rows={ddlRows} />
+
+        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>RSPP</div>
+        <SafetyRowsTable rows={rsppRows} />
+
+        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
+          RAPPRESENTANTE DEI LAVORATORI PER LA SICUREZZA (RLS)
+        </div>
+        <TrainingRowsTable rows={rlsTrainingRows} fallbackLabel="RLS" />
+
+        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>PREPOSTO</div>
+        <TrainingRowsTable rows={prepostoTrainingRows} fallbackLabel="Preposto" />
+
+        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>PRIMO SOCCORSO</div>
+        <TrainingRowsTable rows={primoSoccorsoTrainingRows} fallbackLabel="Primo soccorso" />
+
+        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>BLSD</div>
+        <TrainingRowsTable rows={blsdTrainingRows} fallbackLabel="BLSD" />
+
+        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>ANTINCENDIO</div>
+        <TrainingRowsTable rows={antincendioTrainingRows} fallbackLabel="Antincendio" />
 
         <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
           FORMAZIONE GENERALE E SPECIFICA DEI LAVORATORI
@@ -1030,7 +1268,9 @@ export default async function ClientDetailPage({
                       <td>{r.generale.course?.name ?? "Formazione generale"}</td>
                       <td>{r.mansione}</td>
                       <td>{fmt(r.generale.performedAt)}</td>
-                      <td>{fmt(r.generale.dueDate)}</td>
+                      <td>
+                        <DueCell date={r.generale.dueDate} />
+                      </td>
                     </tr>
                   ) : null}
 
@@ -1040,7 +1280,9 @@ export default async function ClientDetailPage({
                       <td>{r.specifica.course?.name ?? "Formazione specifica"}</td>
                       <td>{r.mansione}</td>
                       <td>{fmt(r.specifica.performedAt)}</td>
-                      <td>{fmt(r.specifica.dueDate)}</td>
+                      <td>
+                        <DueCell date={r.specifica.dueDate} />
+                      </td>
                     </tr>
                   ) : null}
                 </Fragment>
@@ -1054,246 +1296,9 @@ export default async function ClientDetailPage({
             )}
           </tbody>
         </table>
-
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
-          PRIMO SOCCORSO
-        </div>
-
-        <table className="table" style={{ marginTop: 8 }}>
-          <thead>
-            <tr>
-              <th>Nominativo</th>
-              <th>Tipologia corso</th>
-              <th>Mansione</th>
-              <th>Data attestato</th>
-              <th>Scadenza</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sezionePrimoSoccorso.length ? (
-              sezionePrimoSoccorso.map((r: any) => (
-                <tr key={`${r.nome}-primo-soccorso`}>
-                  <td>{r.nome}</td>
-                  <td>{r.primoSoccorso.course?.name ?? "Primo soccorso"}</td>
-                  <td>{r.mansione}</td>
-                  <td>{fmt(r.primoSoccorso.performedAt)}</td>
-                  <td>{fmt(r.primoSoccorso.dueDate)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={5} className="muted">
-                  Nessun dato presente.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
-          BLSD
-        </div>
-
-        <table className="table" style={{ marginTop: 8 }}>
-          <thead>
-            <tr>
-              <th>Nominativo</th>
-              <th>Tipologia corso</th>
-              <th>Mansione</th>
-              <th>Data attestato</th>
-              <th>Scadenza</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sezioneBlsd.length ? (
-              sezioneBlsd.map((r: any) => (
-                <tr key={`${r.nome}-blsd`}>
-                  <td>{r.nome}</td>
-                  <td>{r.blsd.course?.name ?? "BLSD"}</td>
-                  <td>{r.mansione}</td>
-                  <td>{fmt(r.blsd.performedAt)}</td>
-                  <td>{fmt(r.blsd.dueDate)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={5} className="muted">
-                  Nessun dato presente.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
-          ANTINCENDIO
-        </div>
-
-        <table className="table" style={{ marginTop: 8 }}>
-          <thead>
-            <tr>
-              <th>Nominativo</th>
-              <th>Tipologia corso</th>
-              <th>Mansione</th>
-              <th>Data attestato</th>
-              <th>Scadenza</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sezioneAntincendio.length ? (
-              sezioneAntincendio.map((r: any) => (
-                <tr key={`${r.nome}-antincendio`}>
-                  <td>{r.nome}</td>
-                  <td>{r.antincendio.course?.name ?? "Antincendio"}</td>
-                  <td>{r.mansione}</td>
-                  <td>{fmt(r.antincendio.performedAt)}</td>
-                  <td>{fmt(r.antincendio.dueDate)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={5} className="muted">
-                  Nessun dato presente.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
-          RAPPRESENTANTE DEI LAVORATORI PER LA SICUREZZA (RLS)
-        </div>
-
-        <table className="table" style={{ marginTop: 8 }}>
-          <thead>
-            <tr>
-              <th>Nominativo</th>
-              <th>Tipologia corso</th>
-              <th>Mansione</th>
-              <th>Data attestato</th>
-              <th>Scadenza</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sezioneRls.length ? (
-              sezioneRls.map((r: any) => (
-                <tr key={`${r.nome}-rls`}>
-                  <td>{r.nome}</td>
-                  <td>{r.rls.course?.name ?? "RLS"}</td>
-                  <td>{r.mansione}</td>
-                  <td>{fmt(r.rls.performedAt)}</td>
-                  <td>{fmt(r.rls.dueDate)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={5} className="muted">
-                  Nessun dato presente.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
-          PREPOSTO
-        </div>
-
-        <table className="table" style={{ marginTop: 8 }}>
-          <thead>
-            <tr>
-              <th>Nominativo</th>
-              <th>Tipologia corso</th>
-              <th>Mansione</th>
-              <th>Data attestato</th>
-              <th>Scadenza</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sezionePreposti.length ? (
-              sezionePreposti.map((r: any) => (
-                <tr key={`${r.nome}-preposto`}>
-                  <td>{r.nome}</td>
-                  <td>{r.preposto.course?.name ?? "Preposto"}</td>
-                  <td>{r.mansione}</td>
-                  <td>{fmt(r.preposto.performedAt)}</td>
-                  <td>{fmt(r.preposto.dueDate)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={5} className="muted">
-                  Nessun dato presente.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
-          DDL
-        </div>
-
-        <table className="table" style={{ marginTop: 8 }}>
-          <thead>
-            <tr>
-              <th>Nominativo</th>
-              <th>Nomina</th>
-              <th>Scadenza</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ddlRows.length ? (
-              ddlRows.map((r: any) => (
-                <tr key={r.id}>
-                  <td>{r.name || `${r.person?.lastName ?? ""} ${r.person?.firstName ?? ""}`}</td>
-                  <td>{fmt(r.appointedAt)}</td>
-                  <td>{fmt(r.dueDate)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={3} className="muted">
-                  Nessun dato presente.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
-          RSPP
-        </div>
-
-        <table className="table" style={{ marginTop: 8 }}>
-          <thead>
-            <tr>
-              <th>Nominativo</th>
-              <th>Nomina</th>
-              <th>Scadenza</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rsppRows.length ? (
-              rsppRows.map((r: any) => (
-                <tr key={r.id}>
-                  <td>{r.name || `${r.person?.lastName ?? ""} ${r.person?.firstName ?? ""}`}</td>
-                  <td>{fmt(r.appointedAt)}</td>
-                  <td>{fmt(r.dueDate)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={3} className="muted">
-                  Nessun dato presente.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Ingegneria Clinica (VSE)</h2>
 
@@ -1362,7 +1367,7 @@ export default async function ClientDetailPage({
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
+      <div className="card no-print" style={{ marginTop: 12 }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2>Pratiche</h2>
 

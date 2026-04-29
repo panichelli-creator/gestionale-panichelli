@@ -7,6 +7,12 @@ import PrintButton from "@/components/PrintButton";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type SP = {
+  siteId?: string;
+};
+
+const GENERAL_SITE = "__general";
+
 function fmt(d: Date | null | undefined) {
   return d ? new Date(d).toLocaleDateString("it-IT") : "—";
 }
@@ -374,6 +380,22 @@ function fullSafetyName(r: any) {
   return String(r?.name ?? "").trim() || fromPerson || "—";
 }
 
+function personBelongsToSelectedSite(p: any, selectedSiteId: string | null) {
+  if (!selectedSiteId) return true;
+
+  const sites = Array.isArray(p?.personSites) ? p.personSites : [];
+
+  if (selectedSiteId === GENERAL_SITE) return sites.length === 0;
+
+  return sites.some((ps: any) => ps.siteId === selectedSiteId);
+}
+
+function siteNameForPerson(p: any) {
+  const sites = Array.isArray(p?.personSites) ? p.personSites : [];
+  if (!sites.length) return "Generale cliente";
+  return sites.map((ps: any) => ps.site?.name).filter(Boolean).join(", ") || "—";
+}
+
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div
@@ -393,10 +415,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 function DDLTable({ rows }: { rows: any[] }) {
   return (
-    <table
-      className="table prospetto-table"
-      style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}
-    >
+    <table className="table prospetto-table" style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}>
       <thead>
         <tr>
           <th style={{ width: "35%" }}>Nominativo</th>
@@ -440,10 +459,7 @@ function SafetyRowsTable({
   fallbackLabel: string;
 }) {
   return (
-    <table
-      className="table prospetto-table"
-      style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}
-    >
+    <table className="table prospetto-table" style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}>
       <thead>
         <tr>
           <th style={{ width: "25%" }}>Nominativo</th>
@@ -486,10 +502,7 @@ function TrainingRowsTable({
   fallbackLabel: string;
 }) {
   return (
-    <table
-      className="table prospetto-table"
-      style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}
-    >
+    <table className="table prospetto-table" style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}>
       <thead>
         <tr>
           <th style={{ width: "25%" }}>Nominativo</th>
@@ -527,14 +540,35 @@ function TrainingRowsTable({
   );
 }
 
+function siteFilterHref(clientId: string, siteId?: string) {
+  if (!siteId) return `/clients/${clientId}`;
+  return `/clients/${clientId}?siteId=${encodeURIComponent(siteId)}`;
+}
+
+function filterButtonStyle(active: boolean) {
+  return active
+    ? {
+        background: "#2563eb",
+        color: "#fff",
+        border: "1px solid #2563eb",
+      }
+    : undefined;
+}
+
 export default async function ClientDetailPage({
   params,
+  searchParams,
 }: {
   params: { id: string };
+  searchParams?: SP;
 }) {
   const { prisma } = await import("@/lib/prisma");
   const session = getSession();
   const isIngegnereClinico = session?.role === "ingegnere_clinico";
+
+  const selectedSiteIdRaw = String(searchParams?.siteId ?? "").trim();
+  const selectedSiteId = selectedSiteIdRaw || null;
+  const isGeneralFilter = selectedSiteId === GENERAL_SITE;
 
   const client = await prisma.client.findUnique({
     where: { id: params.id },
@@ -551,6 +585,7 @@ export default async function ClientDetailPage({
       },
       people: {
         include: {
+          personSites: { include: { site: true } },
           trainings: {
             include: { course: true },
             orderBy: [{ dueDate: "asc" }],
@@ -562,6 +597,7 @@ export default async function ClientDetailPage({
         include: {
           person: {
             include: {
+              personSites: { include: { site: true } },
               trainings: {
                 include: { course: true },
                 orderBy: [{ dueDate: "asc" }],
@@ -583,19 +619,50 @@ export default async function ClientDetailPage({
 
   if (!client) return notFound();
 
-  const returnTo = `/clients/${client.id}`;
+  const validSiteIds = new Set(client.sites.map((s: any) => s.id));
+  const normalizedSelectedSiteId =
+    selectedSiteId && (selectedSiteId === GENERAL_SITE || validSiteIds.has(selectedSiteId))
+      ? selectedSiteId
+      : null;
+
+  const selectedSite = client.sites.find((s: any) => s.id === normalizedSelectedSiteId) ?? null;
+
+  const selectedFilterLabel = normalizedSelectedSiteId
+    ? normalizedSelectedSiteId === GENERAL_SITE
+      ? "Generale cliente"
+      : selectedSite?.name ?? "Sede"
+    : "Tutte le sedi";
+
+  const returnTo = normalizedSelectedSiteId
+    ? `/clients/${client.id}?siteId=${encodeURIComponent(normalizedSelectedSiteId)}`
+    : `/clients/${client.id}`;
+
   const returnToParam = encodeURIComponent(returnTo);
 
   const primaryContact = client.contacts?.[0] ?? null;
 
-  const vseRows = await prisma.clinicalEngineeringCheck.findMany({
-    where: { clientId: client.id },
+  const vseRowsAll = await prisma.clinicalEngineeringCheck.findMany({
+    where: {
+      clientId: client.id,
+      ...(normalizedSelectedSiteId && normalizedSelectedSiteId !== GENERAL_SITE
+        ? { siteId: normalizedSelectedSiteId }
+        : {}),
+      ...(normalizedSelectedSiteId === GENERAL_SITE ? { siteId: null } : {}),
+    },
     orderBy: { dataProssimoAppuntamento: "asc" },
   });
 
-  const totalServices = client.services.length;
+  const servicesRows = client.services.filter((s: any) => {
+    if (!normalizedSelectedSiteId) return true;
+    if (normalizedSelectedSiteId === GENERAL_SITE) return !s.siteId;
+    return s.siteId === normalizedSelectedSiteId;
+  });
 
-  const annualTotal = client.services.reduce((acc, s) => {
+  const vseRows = vseRowsAll;
+
+  const totalServices = servicesRows.length;
+
+  const annualTotal = servicesRows.reduce((acc, s) => {
     const price = toNum(s.priceEur);
     const factor = periodicityFactor(s.periodicity);
     return acc + price * factor;
@@ -608,11 +675,15 @@ export default async function ClientDetailPage({
     if (pc.person) personMap.set(pc.person.id, pc.person);
   }
 
-  const peopleRows = Array.from(personMap.values()).sort((a, b) => {
+  const peopleRowsAll = Array.from(personMap.values()).sort((a, b) => {
     const byLast = String(a.lastName ?? "").localeCompare(String(b.lastName ?? ""), "it");
     if (byLast !== 0) return byLast;
     return String(a.firstName ?? "").localeCompare(String(b.firstName ?? ""), "it");
   });
+
+  const peopleRows = peopleRowsAll.filter((p: any) =>
+    personBelongsToSelectedSite(p, normalizedSelectedSiteId)
+  );
 
   const trainingRows = peopleRows
     .flatMap((p: any) =>
@@ -695,6 +766,7 @@ export default async function ClientDetailPage({
     return {
       nome: `${p.lastName} ${p.firstName}`.trim(),
       mansione: p.role || "—",
+      sede: siteNameForPerson(p),
       ddl: trainings.find((t: any) => isCourse(t, ["DDL", "DATORE", "RSPP DATORE"])),
       generale: trainings.find((t: any) => isCourse(t, ["GENERALE"])),
       specifica: trainings.find((t: any) => isCourse(t, ["SPEC"])),
@@ -714,7 +786,7 @@ export default async function ClientDetailPage({
   const sezionePreposti = formazioneRows.filter((r: any) => r.preposto);
   const sezioneDdl = formazioneRows.filter((r: any) => r.ddl);
 
-  const rsppRows = safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "RSPP");
+  const rsppRows = normalizedSelectedSiteId ? [] : safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "RSPP");
 
   const ddlTrainingRows = sezioneDdl.map((r: any) => ({ ...r, __training: r.ddl }));
   const rlsTrainingRows = sezioneRls.map((r: any) => ({ ...r, __training: r.rls }));
@@ -837,6 +909,48 @@ export default async function ClientDetailPage({
             ← Clienti
           </Link>
         </div>
+      </div>
+
+      <div className="card no-print" style={{ marginTop: 12 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h2>Filtro sede</h2>
+        </div>
+
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          <Link className="btn" href={siteFilterHref(client.id)} style={filterButtonStyle(!normalizedSelectedSiteId)}>
+            Tutte le sedi
+          </Link>
+
+          <Link
+            className="btn"
+            href={siteFilterHref(client.id, GENERAL_SITE)}
+            style={filterButtonStyle(normalizedSelectedSiteId === GENERAL_SITE)}
+          >
+            Generale cliente
+          </Link>
+
+          {client.sites.map((s: any) => (
+            <Link
+              key={s.id}
+              className="btn"
+              href={siteFilterHref(client.id, s.id)}
+              style={filterButtonStyle(normalizedSelectedSiteId === s.id)}
+            >
+              {s.name}
+            </Link>
+          ))}
+        </div>
+
+        <div className="muted" style={{ marginTop: 8 }}>
+          Vista attiva: <b>{selectedFilterLabel}</b>
+        </div>
+
+        {normalizedSelectedSiteId ? (
+          <div className="muted" style={{ marginTop: 6 }}>
+            Nota: pratiche e organigramma non sono ancora filtrabili per sede perché nel database non hanno ancora
+            un campo sede dedicato.
+          </div>
+        ) : null}
       </div>
 
       <div className="card no-print" style={{ marginTop: 12 }}>
@@ -1085,7 +1199,11 @@ export default async function ClientDetailPage({
           DDL, RSPP, RLS, Preposto, Primo soccorso, BLSD, Antincendio, Dirigente.
         </div>
 
-        {safetyRolesOrdered.length ? (
+        {normalizedSelectedSiteId ? (
+          <div className="muted" style={{ marginTop: 10 }}>
+            Organigramma non filtrato per sede in questa fase.
+          </div>
+        ) : safetyRolesOrdered.length ? (
           <table className="table" style={{ marginTop: 10 }}>
             <thead>
               <tr>
@@ -1139,14 +1257,14 @@ export default async function ClientDetailPage({
         </div>
 
         <div className="muted">
-          Totale servizi: <b>{totalServices}</b>
+          Totale servizi in vista: <b>{totalServices}</b>
         </div>
 
         <div className="muted">
-          Totale annuo stimato: <b>{eur(annualTotal)}</b>
+          Totale annuo stimato in vista: <b>{eur(annualTotal)}</b>
         </div>
 
-        {client.services.length ? (
+        {servicesRows.length ? (
           <table className="table">
             <thead>
               <tr>
@@ -1160,12 +1278,12 @@ export default async function ClientDetailPage({
             </thead>
 
             <tbody>
-              {client.services.map((s: any) => (
+              {servicesRows.map((s: any) => (
                 <tr key={s.id}>
                   <td>
                     <b>{s.service?.name}</b>
                   </td>
-                  <td>{s.site?.name ?? "—"}</td>
+                  <td>{s.site?.name ?? "Generale cliente"}</td>
                   <td>{getReferenteLabel(s)}</td>
                   <td>{fmt(s.dueDate)}</td>
                   <td>{s.periodicity}</td>
@@ -1175,7 +1293,7 @@ export default async function ClientDetailPage({
             </tbody>
           </table>
         ) : (
-          <div className="muted">Nessun servizio</div>
+          <div className="muted">Nessun servizio nella vista selezionata</div>
         )}
       </div>
 
@@ -1198,7 +1316,7 @@ export default async function ClientDetailPage({
         </div>
 
         <div className="muted">
-          Totale persone: <b>{peopleRows.length}</b>
+          Totale persone in vista: <b>{peopleRows.length}</b>
         </div>
 
         {peopleRows.length ? (
@@ -1206,6 +1324,7 @@ export default async function ClientDetailPage({
             <thead>
               <tr>
                 <th>Persona</th>
+                <th>Sede</th>
                 <th>Mansione</th>
                 <th>Email</th>
                 <th>Telefono</th>
@@ -1228,6 +1347,7 @@ export default async function ClientDetailPage({
                         {p.lastName} {p.firstName}
                       </Link>
                     </td>
+                    <td>{siteNameForPerson(p)}</td>
                     <td>{p.role ?? "—"}</td>
                     <td>{p.email ?? "—"}</td>
                     <td>{p.phone ?? "—"}</td>
@@ -1240,7 +1360,7 @@ export default async function ClientDetailPage({
           </table>
         ) : (
           <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna persona
+            Nessuna persona nella vista selezionata
           </div>
         )}
       </div>
@@ -1260,7 +1380,7 @@ export default async function ClientDetailPage({
 
         <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 10 }}>
           <div className="card">
-            Totale corsi: <b>{trainingRows.length}</b>
+            Totale corsi in vista: <b>{trainingRows.length}</b>
           </div>
           <div className="card">
             Scaduti: <b>{trainingScaduti}</b>
@@ -1281,6 +1401,7 @@ export default async function ClientDetailPage({
             <thead>
               <tr>
                 <th>Persona</th>
+                <th>Sede</th>
                 <th>Corso</th>
                 <th>Effettuato il</th>
                 <th>Scadenza</th>
@@ -1303,6 +1424,7 @@ export default async function ClientDetailPage({
                       {t.__person.lastName} {t.__person.firstName}
                     </Link>
                   </td>
+                  <td>{siteNameForPerson(t.__person)}</td>
                   <td>{t.course?.name ?? "—"}</td>
                   <td>{fmt(t.performedAt)}</td>
                   <td>{fmt(t.dueDate)}</td>
@@ -1325,7 +1447,7 @@ export default async function ClientDetailPage({
           </table>
         ) : (
           <div className="muted" style={{ marginTop: 10 }}>
-            Nessun corso associato
+            Nessun corso nella vista selezionata
           </div>
         )}
       </div>
@@ -1339,7 +1461,7 @@ export default async function ClientDetailPage({
         </div>
 
         <div className="muted" style={{ marginTop: 6 }}>
-          Cliente: <b>{client.name}</b>
+          Cliente: <b>{client.name}</b> — Vista: <b>{selectedFilterLabel}</b>
         </div>
 
         <div className="muted" style={{ marginTop: 6 }}>
@@ -1371,10 +1493,7 @@ export default async function ClientDetailPage({
 
         <SectionTitle>FORMAZIONE GENERALE E SPECIFICA DEI LAVORATORI</SectionTitle>
 
-        <table
-          className="table prospetto-table"
-          style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}
-        >
+        <table className="table prospetto-table" style={{ marginTop: 8, width: "100%", tableLayout: "fixed" }}>
           <thead>
             <tr>
               <th style={{ width: "25%" }}>Nominativo</th>
@@ -1448,13 +1567,14 @@ export default async function ClientDetailPage({
         </div>
 
         <div className="muted">
-          Totale verifiche: <b>{vseRows.length}</b>
+          Totale verifiche in vista: <b>{vseRows.length}</b>
         </div>
 
         {vseRows.length ? (
           <table className="table">
             <thead>
               <tr>
+                <th>Sede</th>
                 <th>Prossimo appuntamento</th>
                 <th>Stato</th>
                 <th>€ Servizio</th>
@@ -1463,11 +1583,12 @@ export default async function ClientDetailPage({
             </thead>
 
             <tbody>
-              {vseRows.map((r) => {
+              {vseRows.map((r: any) => {
                 const badge = vseBadge(r.dataProssimoAppuntamento);
 
                 return (
                   <tr key={r.id}>
+                    <td>{r.site?.name ?? r.nomeSedeSnapshot ?? "Generale cliente"}</td>
                     <td>{fmt(r.dataProssimoAppuntamento)}</td>
                     <td>
                       <span className={badge.cls}>{badge.label}</span>
@@ -1488,7 +1609,7 @@ export default async function ClientDetailPage({
           </table>
         ) : (
           <div className="muted" style={{ marginTop: 10 }}>
-            Nessuna verifica
+            Nessuna verifica nella vista selezionata
           </div>
         )}
       </div>
@@ -1513,6 +1634,12 @@ export default async function ClientDetailPage({
             <div className="muted">Sola consultazione</div>
           )}
         </div>
+
+        {normalizedSelectedSiteId ? (
+          <div className="muted" style={{ marginTop: 10 }}>
+            Pratiche non filtrate per sede in questa fase.
+          </div>
+        ) : null}
 
         <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 10 }}>
           <div className="card">

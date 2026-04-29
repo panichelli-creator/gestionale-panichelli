@@ -620,6 +620,7 @@ export default async function ClientDetailPage({
     return {
       nome: `${p.lastName} ${p.firstName}`.trim(),
       mansione: p.role || "—",
+      ddl: trainings.find((t: any) => isCourse(t, ["DDL", "DATORE", "RSPP DATORE"])),
       generale: trainings.find((t: any) => isCourse(t, ["GENERALE"])),
       specifica: trainings.find((t: any) => isCourse(t, ["SPEC"])),
       preposto: trainings.find((t: any) => isCourse(t, ["PREPOSTI", "PREPOSTO"])),
@@ -636,10 +637,11 @@ export default async function ClientDetailPage({
   const sezioneBlsd = formazioneRows.filter((r: any) => r.blsd);
   const sezioneRls = formazioneRows.filter((r: any) => r.rls);
   const sezionePreposti = formazioneRows.filter((r: any) => r.preposto);
+  const sezioneDdl = formazioneRows.filter((r: any) => r.ddl);
 
-  const ddlRows = safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "DDL");
   const rsppRows = safetyRolesOrdered.filter((r: any) => String(r.role).toUpperCase() === "RSPP");
 
+  const ddlTrainingRows = sezioneDdl.map((r: any) => ({ ...r, __training: r.ddl }));
   const rlsTrainingRows = sezioneRls.map((r: any) => ({ ...r, __training: r.rls }));
   const prepostoTrainingRows = sezionePreposti.map((r: any) => ({ ...r, __training: r.preposto }));
   const primoSoccorsoTrainingRows = sezionePrimoSoccorso.map((r: any) => ({
@@ -656,48 +658,83 @@ export default async function ClientDetailPage({
     <div className="card">
       <style>{`
         @media print {
+          html,
+          body {
+            background: #fff !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
           body * {
-            visibility: hidden;
+            visibility: hidden !important;
+          }
+
+          .no-print,
+          .no-print * {
+            display: none !important;
+            visibility: hidden !important;
           }
 
           #prospetto-formazione-print,
           #prospetto-formazione-print * {
-            visibility: visible;
+            visibility: visible !important;
           }
 
           #prospetto-formazione-print {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            background: white;
-            padding: 0;
-            margin: 0;
-          }
-
-          .no-print {
-            display: none !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            background: #fff !important;
+            color: #000 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            border: 0 !important;
+            font-size: 8px !important;
+            line-height: 1.05 !important;
           }
 
           #prospetto-formazione-print .table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 11px;
+            width: 100% !important;
+            border-collapse: collapse !important;
+            font-size: 8px !important;
           }
 
           #prospetto-formazione-print .table th,
           #prospetto-formazione-print .table td {
-            border: 1px solid #111;
-            padding: 5px 6px;
+            border: 1px solid #111 !important;
+            padding: 2px 4px !important;
+            color: #000 !important;
           }
 
           #prospetto-formazione-print h2 {
-            text-align: center;
+            text-align: center !important;
+            color: #000 !important;
+            font-size: 14px !important;
+            margin: 0 0 4px 0 !important;
+          }
+
+          #prospetto-formazione-print .print-section-title {
+            margin-top: 7px !important;
+            font-weight: 900 !important;
+            text-align: center !important;
+            font-size: 9px !important;
+          }
+
+          #prospetto-formazione-print span {
+            font-size: 8px !important;
+            padding: 1px 5px !important;
+          }
+
+          tr {
+            page-break-inside: avoid !important;
           }
 
           @page {
-            size: A4;
-            margin: 12mm;
+            size: A4 landscape;
+            margin: 7mm;
           }
         }
       `}</style>
@@ -1212,7 +1249,7 @@ export default async function ClientDetailPage({
         </div>
 
         <div className="muted" style={{ marginTop: 6 }}>
-          Cliente: <b>{client.name}</b> — Generato automaticamente da persone, nomine e formazione.
+          Cliente: <b>{client.name}</b>
         </div>
 
         <div className="muted" style={{ marginTop: 6 }}>
@@ -1221,32 +1258,30 @@ export default async function ClientDetailPage({
           <b style={{ color: "#b91c1c" }}>rosso</b> = scaduto.
         </div>
 
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>DDL</div>
-        <SafetyRowsTable rows={ddlRows} />
+        <div className="print-section-title">DDL</div>
+        <TrainingRowsTable rows={ddlTrainingRows} fallbackLabel="Corso DDL" />
 
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>RSPP</div>
+        <div className="print-section-title">RSPP</div>
         <SafetyRowsTable rows={rsppRows} />
 
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
+        <div className="print-section-title">
           RAPPRESENTANTE DEI LAVORATORI PER LA SICUREZZA (RLS)
         </div>
         <TrainingRowsTable rows={rlsTrainingRows} fallbackLabel="RLS" />
 
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>PREPOSTO</div>
+        <div className="print-section-title">PREPOSTO</div>
         <TrainingRowsTable rows={prepostoTrainingRows} fallbackLabel="Preposto" />
 
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>PRIMO SOCCORSO</div>
+        <div className="print-section-title">PRIMO SOCCORSO</div>
         <TrainingRowsTable rows={primoSoccorsoTrainingRows} fallbackLabel="Primo soccorso" />
 
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>BLSD</div>
+        <div className="print-section-title">BLSD</div>
         <TrainingRowsTable rows={blsdTrainingRows} fallbackLabel="BLSD" />
 
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>ANTINCENDIO</div>
+        <div className="print-section-title">ANTINCENDIO</div>
         <TrainingRowsTable rows={antincendioTrainingRows} fallbackLabel="Antincendio" />
 
-        <div style={{ marginTop: 18, fontWeight: 900, textAlign: "center" }}>
-          FORMAZIONE GENERALE E SPECIFICA DEI LAVORATORI
-        </div>
+        <div className="print-section-title">FORMAZIONE GENERALE E SPECIFICA DEI LAVORATORI</div>
 
         <table className="table" style={{ marginTop: 8 }}>
           <thead>
